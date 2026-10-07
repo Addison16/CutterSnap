@@ -68,3 +68,16 @@ def test_huge_dimensions_refused(monkeypatch, star_photo):
     img, _ = star_photo
     res = client.post("/api/trace", files={"image": ("s.png", _png(img), "image/png")})
     assert res.status_code == 413
+
+
+def test_trace_with_edge_points(star_photo):
+    from conftest import star_points
+
+    img, _ = star_photo
+    pts = star_points(400, 310, 230, 110).tolist()
+    res = client.post("/api/trace", files={"image": ("s.png", _png(img), "image/png")},
+                      data={"edge": json.dumps(pts), "size_mm": "80"})
+    assert res.status_code == 200, res.text
+    res = client.post("/api/trace", files={"image": ("s.png", _png(img), "image/png")},
+                      data={"edge": json.dumps(pts[:2])})
+    assert res.status_code == 400

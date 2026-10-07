@@ -16,12 +16,15 @@
   <section class="panel" id="photo-panel">
     <div class="steps">
       <label class="file">1. Choose a photo <input type="file" id="file" accept="image/*"></label>
+      <label class="file" title="Reopen a saved .json project">Open project <input type="file" id="open" accept=".json,application/json"></label>
       <div class="tools" role="radiogroup" aria-label="Tool">
         <span>2. Mark the cookie:</span>
         <button data-tool="box" class="active">Draw box</button>
         <button data-tool="fg">Cookie click</button>
         <button data-tool="bg">Not cookie click</button>
+        <button data-tool="edge" title="Click points on the cookie's edge, in order around it. Drag a point to move it, shift-click to remove it.">Edge points</button>
         <button id="clear">Clear marks</button>
+        <button id="zoom" disabled>Zoom to box</button>
       </div>
     </div>
     <div class="canvas-wrap"><canvas id="photo"></canvas><p id="hint">Drop or choose a photo to start.</p></div>
@@ -36,7 +39,9 @@
     <label>Base width (mm) <input type="number" id="flange" value="6" min="2" max="20"></label>
     <label title="Baked cookies spread. Shrink the cutter to match the raw dough; about 1 mm suits sugar cookies.">Dough spread (mm) <input type="number" id="spread" value="0" min="0" max="5" step="0.5"></label>
     <button id="trace" class="primary" disabled>Trace outline</button>
+    <button id="edit" disabled title="Turn the traced outline into edge points you can drag">Edit as points</button>
     <button id="make" class="primary" disabled>Make cutter</button>
+    <button id="save" disabled title="Save the outline, marks and settings to rebuild this cutter later">Save project</button>
     <a id="download" class="primary hidden" download="cookie-cutter.stl">Download STL</a>
     <p id="status" aria-live="polite"></p>
     <div id="preview"></div>

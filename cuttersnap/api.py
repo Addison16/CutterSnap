@@ -16,6 +16,7 @@ from shapely.ops import orient
 
 from . import __version__
 from .cutter import CutterParams, build_cutter
+from .livewire import edge_mask
 from .outline import OutlineError, check_outline, mask_to_outline
 from .segment import segment
 
@@ -96,14 +97,25 @@ async def trace(
     rect: str = Form(""),
     fg: str = Form("[]"),
     bg: str = Form("[]"),
+    edge: str = Form("[]"),
     size_mm: float = Form(90.0),
 ) -> dict:
-    """Find the cookie and return its smoothed outline in mm and photo pixels."""
+    """Find the cookie and return its smoothed outline in mm and photo pixels.
+
+    With three or more edge points the outline follows the photo's edges
+    through those points; otherwise the box and clicks guide automatic tracing.
+    """
     if not 20 <= size_mm <= 300:
         raise HTTPException(400, "size must be between 20 and 300 mm")
     img = _read_image(await _read_upload(image))
-    r = _rect(rect, img.shape[1], img.shape[0])
-    mask = segment(img, r, _points(fg), _points(bg))
+    h, w = img.shape[:2]
+    edge_pts = [(min(w - 1, max(0, x)), min(h - 1, max(0, y))) for x, y in _points(edge)]
+    if edge_pts:
+        if len(edge_pts) < 3:
+            raise HTTPException(400, "place at least 3 edge points")
+        mask = edge_mask(img, edge_pts)
+    else:
+        mask = segment(img, _rect(rect, w, h), _points(fg), _points(bg))
     try:
         outline = mask_to_outline(mask, size_mm)
     except OutlineError as e:
