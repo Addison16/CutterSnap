@@ -16,14 +16,13 @@ function loadFile(file) {
   const img = new Image();
   img.onload = () => {
     state.img = img;
-    state.rect = null; state.fg = []; state.bg = []; state.outline = null;
+    state.rect = null; state.fg = []; state.bg = []; resetCutter();
     const maxW = canvas.parentElement.clientWidth;
     state.scale = Math.min(1, maxW / img.width, 900 / img.height);
     canvas.width = Math.round(img.width * state.scale);
     canvas.height = Math.round(img.height * state.scale);
     $('hint').classList.add('hidden');
     $('trace').disabled = false;
-    $('make').disabled = true;
     draw();
     setStatus('Draw a box around the cookie, then Trace outline. Single-cookie photos can skip the box.');
   };
@@ -78,7 +77,12 @@ document.querySelectorAll('[data-tool]').forEach((b) => b.addEventListener('clic
   document.querySelectorAll('[data-tool]').forEach((o) => o.classList.toggle('active', o === b));
   state.tool = b.dataset.tool;
 }));
-$('clear').addEventListener('click', () => { state.rect = null; state.fg = []; state.bg = []; state.outline = null; draw(); });
+function resetCutter() {
+  state.outline = null; state.outlineMm = null;
+  $('make').disabled = true;
+  $('download').classList.add('hidden');
+}
+$('clear').addEventListener('click', () => { state.rect = null; state.fg = []; state.bg = []; resetCutter(); draw(); });
 $('file').addEventListener('change', (e) => loadFile(e.target.files[0]));
 document.addEventListener('dragover', (e) => e.preventDefault());
 document.addEventListener('drop', (e) => { e.preventDefault(); loadFile(e.dataTransfer.files[0]); });
@@ -96,6 +100,7 @@ $('trace').addEventListener('click', async () => {
   form.append('bg', JSON.stringify(state.bg));
   form.append('size_mm', $('size').value);
   setStatus('Tracing…'); $('trace').disabled = true;
+  resetCutter(); draw();
   try {
     const res = await fetch('/api/trace', { method: 'POST', body: form });
     if (!res.ok) throw new Error(await apiError(res));

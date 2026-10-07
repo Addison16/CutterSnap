@@ -33,19 +33,49 @@ app = FastAPI(title="CutterSnap", version=__version__)
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
 
-def _read_image(data: bytes) -> np.ndarray:
+MAX_PIXELS = 50_000_000  # a 48 MP phone photo fits; larger is rejected before decoding
+
+
+async def _read_upload(upload: UploadFile) -> bytes:
+    """Read at most MAX_UPLOAD bytes so a huge upload is refused, not buffered."""
+    data = await upload.read(MAX_UPLOAD + 1)
     if len(data) > MAX_UPLOAD:
         raise HTTPException(413, "image is larger than 25 MB")
+    return data
+
+
+def _read_image(data: bytes) -> np.ndarray:
     try:
-        im = ImageOps.exif_transpose(Image.open(io.BytesIO(data))).convert("RGB")
+        im = Image.open(io.BytesIO(data))
+        # header only so far: refuse decompression bombs before decoding pixels
+        if im.width * im.height > MAX_PIXELS:
+            raise HTTPException(413, "image has more than 50 megapixels")
+        im = ImageOps.exif_transpose(im).convert("RGB")
+    except HTTPException:
+        raise
     except Exception as e:  # noqa: BLE001 - any decode failure is a bad upload
         raise HTTPException(400, f"could not read image: {e}") from e
     return np.asarray(im)[:, :, ::-1].copy()  # RGB -> BGR for OpenCV
 
 
+def _rect(raw: str, width: int, height: int) -> tuple[int, int, int, int] | None:
+    """Parse the user's box and clip it to the photo."""
+    if not raw:
+        return None
+    try:
+        x, y, w, h = (int(float(v)) for v in json.loads(raw))
+    except (ValueError, TypeError) as e:
+        raise HTTPException(400, "box must be [x, y, width, height]") from e
+    x0, y0 = max(0, x), max(0, y)
+    x1, y1 = min(width, x + w), min(height, y + h)
+    if x1 - x0 < 8 or y1 - y0 < 8:
+        raise HTTPException(400, "box must cover at least 8 x 8 pixels of the photo")
+    return x0, y0, x1 - x0, y1 - y0
+
+
 def _points(raw: str) -> list[tuple[int, int]]:
     try:
-        return [(int(x), int(y)) for x, y in json.loads(raw or "[]")]
+        return [(int(float(x)), int(float(y))) for x, y in json.loads(raw or "[]")]
     except (ValueError, TypeError) as e:
         raise HTTPException(400, "points must be a JSON list of [x, y]") from e
 
@@ -71,13 +101,8 @@ async def trace(
     """Find the cookie and return its smoothed outline in mm and photo pixels."""
     if not 20 <= size_mm <= 300:
         raise HTTPException(400, "size must be between 20 and 300 mm")
-    img = _read_image(await image.read())
-    r = None
-    if rect:
-        vals = json.loads(rect)
-        if len(vals) != 4 or vals[2] < 8 or vals[3] < 8:
-            raise HTTPException(400, "box must be [x, y, width, height] and at least 8 px")
-        r = tuple(int(v) for v in vals)
+    img = _read_image(await _read_upload(image))
+    r = _rect(rect, img.shape[1], img.shape[0])
     mask = segment(img, r, _points(fg), _points(bg))
     try:
         outline = mask_to_outline(mask, size_mm)

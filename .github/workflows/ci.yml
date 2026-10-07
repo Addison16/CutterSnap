@@ -26,6 +26,18 @@ jobs:
       - uses: actions/checkout@v4
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
+      - name: Build the image for testing
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: cuttersnap-local
+          cache-to: type=gha,mode=max
+      - name: Smoke test the image
+        run: |
+          docker run -d --name cs -p 8080:8080 cuttersnap-local
+          for i in $(seq 30); do curl -sf localhost:8080/api/health && exit 0; sleep 2; done
+          docker logs cs; exit 1
       - name: Log in to GitHub Container Registry
         if: github.event_name == 'push'
         uses: docker/login-action@v3
@@ -33,16 +45,13 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - name: Build (and publish on main)
+      # publish only after the smoke test passed; the same layers come from cache
+      - name: Publish multi-arch image
+        if: github.event_name == 'push'
         uses: docker/build-push-action@v6
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          push: ${{ github.event_name == 'push' }}
+          push: true
+          cache-from: type=gha
           tags: ghcr.io/addison16/cuttersnap:latest
-      - name: Smoke test the image
-        run: |
-          docker build -t cuttersnap-local .
-          docker run -d --name cs -p 8080:8080 cuttersnap-local
-          for i in $(seq 30); do curl -sf localhost:8080/api/health && exit 0; sleep 2; done
-          docker logs cs; exit 1

@@ -129,9 +129,12 @@ def segment(
     fgs = [to_work(p) for p in fg] or [(x + rw // 2, y + rh // 2)]
     bgs = [to_work(p) for p in bg]
 
-    prior = edge_prior(im[y:y + rh, x:x + rw],
-                       [(a - x, b - y) for a, b in fgs],
-                       [(a - x, b - y) for a, b in bgs if x <= a < x + rw and y <= b < y + rh])
+    def in_box(pts):
+        return [(a - x, b - y) for a, b in pts if x <= a < x + rw and y <= b < y + rh]
+
+    # the edge prior works inside the box; clicks outside it only steer GrabCut
+    roi_fg = in_box(fgs)
+    prior = edge_prior(im[y:y + rh, x:x + rw], roi_fg, in_box(bgs)) if roi_fg else None
     clicks = (fg and fgs, bgs)
     out = _grabcut(im, (x, y, rw, rh), prior, clicks, iters)
 
