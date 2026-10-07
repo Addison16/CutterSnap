@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CutterSnap</title>
+<link rel="stylesheet" href="/static/style.css">
+<script type="importmap">{"imports": {"three": "/static/vendor/three.module.min.js"}}</script>
+</head>
+<body>
+<header>
+  <h1>CutterSnap</h1>
+  <p>Photo of a cookie in, printable cookie cutter out.</p>
+</header>
+<main>
+  <section class="panel" id="photo-panel">
+    <div class="steps">
+      <label class="file">1. Choose a photo <input type="file" id="file" accept="image/*"></label>
+      <div class="tools" role="radiogroup" aria-label="Tool">
+        <span>2. Mark the cookie:</span>
+        <button data-tool="box" class="active">Draw box</button>
+        <button data-tool="fg">Cookie click</button>
+        <button data-tool="bg">Not cookie click</button>
+        <button id="clear">Clear marks</button>
+      </div>
+    </div>
+    <div class="canvas-wrap"><canvas id="photo"></canvas><p id="hint">Drop or choose a photo to start.</p></div>
+  </section>
+  <section class="panel" id="settings">
+    <h2>3. Size and print settings</h2>
+    <label>Longest side (mm) <input type="number" id="size" value="90" min="20" max="300"></label>
+    <label>Nozzle (mm)
+      <select id="nozzle"><option>0.25</option><option selected>0.4</option><option>0.6</option><option>0.8</option></select>
+    </label>
+    <label>Cutter height (mm) <input type="number" id="height" value="18" min="8" max="40"></label>
+    <label>Base width (mm) <input type="number" id="flange" value="6" min="2" max="20"></label>
+    <label title="Baked cookies spread. Shrink the cutter to match the raw dough; about 1 mm suits sugar cookies.">Dough spread (mm) <input type="number" id="spread" value="0" min="0" max="5" step="0.5"></label>
+    <button id="trace" class="primary" disabled>Trace outline</button>
+    <button id="make" class="primary" disabled>Make cutter</button>
+    <a id="download" class="primary hidden" download="cookie-cutter.stl">Download STL</a>
+    <p id="status" aria-live="polite"></p>
+    <div id="preview"></div>
+  </section>
+</main>
+<script type="module" src="/static/app.js"></script>
+</body>
+</html>
