@@ -8,7 +8,7 @@ const ctx = canvas.getContext('2d');
 const state = {
   file: null, img: null, hash: '', scale: 1, view: [0, 0, 1, 1], zoomed: false, tool: 'box', rect: null, fg: [], bg: [], edge: [],
   drag: null, moving: -1, outline: null, outlineMm: null, traceSeq: 0,
-  frame: null, stampMm: [], stampPx: [], stampSeq: 0,
+  frame: null, stampMm: [], stampPx: [], stampSeq: 0, checkSeq: 0,
 };
 
 function setStatus(msg) { $('status').textContent = msg; }
@@ -187,7 +187,7 @@ function resetCutter() {
   $('download').classList.add('hidden');
   $('download-pusher').classList.add('hidden');
   $('download-stamp').classList.add('hidden');
-  state.frame = null; state.stampMm = []; state.stampPx = [];
+  state.frame = null; state.stampMm = []; state.stampPx = []; state.check = null;
   showReport([]);
 }
 $('clear').addEventListener('click', () => {
@@ -243,12 +243,32 @@ async function trace() {
     draw();
     for (const id of ['make', 'edit', 'save']) $(id).disabled = false;
     findStampLines();
-    state.check = data.check;
-    showReport(outlineReport());
+    refreshCheck();
     setStatus((state.edge.length >= 3
       ? 'Drag or add yellow points where it misses the edge.'
       : 'Wrong edge? Add cookie / not cookie clicks and trace again, or use Edit as points.'));
   } catch (e) { if (seq === state.traceSeq) { resetCutter(); draw(); setStatus(`Could not trace: ${e.message}`); } }
+}
+function cutterBody() {
+  return {
+    outline_mm: state.outlineMm, nozzle_mm: +$('nozzle').value,
+    height: +$('height').value, flange_w: +$('flange').value, spread: +$('spread').value,
+  };
+}
+// radius check of the blade's cutting face, which dough spread makes sharper
+async function refreshCheck() {
+  if (!state.outlineMm) return;
+  const seq = ++state.checkSeq;
+  state.check = null;
+  showReport(outlineReport());
+  try {
+    const res = await fetch('/api/check', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cutterBody()) });
+    if (!res.ok) throw new Error(await apiError(res));
+    const check = await res.json();
+    if (seq !== state.checkSeq) return;
+    state.check = check;
+    showReport(outlineReport());
+  } catch (e) { if (seq === state.checkSeq) setStatus(`Could not check the outline: ${e.message}`); }
 }
 // what the finished cookie will measure, and what the checks found
 function outlineReport() {
@@ -280,7 +300,7 @@ document.querySelectorAll('[data-size]').forEach((b) => b.addEventListener('clic
 }));
 // the outline is traced at a size, so a new size means a new trace
 $('size').addEventListener('change', () => { if (state.outlineMm && state.img) trace(); });
-$('spread').addEventListener('change', () => { if (state.outlineMm) showReport(outlineReport()); });
+$('spread').addEventListener('change', refreshCheck);
 
 // ---- matching stamp ----------------------------------------------------------
 async function findStampLines() {
@@ -320,10 +340,8 @@ $('make').addEventListener('click', async () => {
   if (!state.outlineMm) return;
   setStatus('Building cutter…'); $('make').disabled = true;
   try {
-    const body = JSON.stringify({
-      outline_mm: state.outlineMm, nozzle_mm: +$('nozzle').value,
-      height: +$('height').value, flange_w: +$('flange').value, spread: +$('spread').value,
-    });
+    for (const id of ['download', 'download-pusher', 'download-stamp']) $(id).classList.add('hidden');
+    const body = JSON.stringify(cutterBody());
     const post = (url) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
     const wantStamp = $('stamp-on').checked && state.stampMm.length;
     const stampBody = wantStamp && JSON.stringify({ ...JSON.parse(body), lines_mm: state.stampMm });
@@ -401,6 +419,7 @@ $('open').addEventListener('change', async (e) => {
   $('make').disabled = $('save').disabled = false;
   $('edit').disabled = !state.outline;
   draw();
+  refreshCheck();
   const same = state.hash && p.photo?.sha256 === state.hash;
   setStatus(`Opened ${f.name}. ` + (state.img
     ? (same || !p.photo?.sha256 ? 'Make cutter rebuilds it exactly.' : `Note: it was made from a different photo (${p.photo.name}).`)

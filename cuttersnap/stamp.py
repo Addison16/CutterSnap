@@ -19,7 +19,7 @@ from shapely.affinity import scale
 from shapely.geometry import MultiPolygon, Polygon
 from shapely.ops import orient, unary_union
 
-from .cutter import CutterParams, _cross_section, mirrored
+from .cutter import CutterParams, _cross_section, cutting_face, mirrored
 from .outline import Outline
 
 WORK_PX_PER_MM = 6.0   # photo resampled to this resolution before finding lines
@@ -106,9 +106,7 @@ def build_stamp(outline: Polygon, detail: MultiPolygon, params: CutterParams | N
     """
     p = params or CutterParams()
     s = stamp or StampParams()
-    inner = orient(outline, 1.0)
-    if p.spread:
-        inner = inner.buffer(-p.spread, join_style=1)
+    inner = cutting_face(outline, p.spread)
     plate = inner.buffer(-s.clearance, join_style=1)
     if plate.is_empty:
         raise ValueError("this cookie is too small for a stamp")

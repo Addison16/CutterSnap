@@ -15,7 +15,7 @@ from shapely.geometry import Polygon
 from shapely.ops import orient
 
 from . import __version__
-from .cutter import CutterParams, PusherParams, build_cutter, build_pusher
+from .cutter import CutterParams, PusherParams, build_cutter, build_pusher, cutting_face
 from .livewire import edge_mask
 from .outline import Outline, OutlineError, check_outline, mask_to_outline
 from .segment import segment
@@ -193,6 +193,16 @@ def _stl(mesh, filename: str, notes: list[str]) -> Response:
     if notes:
         headers["X-CutterSnap-Warning"] = " ".join(notes)
     return Response(mesh.export(file_type="stl"), media_type="model/stl", headers=headers)
+
+
+@app.post("/api/check")
+def check(req: CutterRequest) -> dict:
+    """Radius check of the blade's cutting face, after any dough spread."""
+    poly, params = _request_geometry(req)
+    try:
+        return check_outline(cutting_face(poly, params.spread))
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
 
 
 @app.post("/api/cutter")

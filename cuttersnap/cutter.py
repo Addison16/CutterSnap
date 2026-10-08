@@ -25,6 +25,8 @@ from shapely.affinity import scale
 from shapely.geometry import MultiPolygon, Polygon
 from shapely.ops import orient, polylabel
 
+from .outline import OutlineError, _exact
+
 CHAMFER_SLICES = 6
 TAPER_SLICES = 16
 
@@ -118,6 +120,25 @@ def mirrored(poly: Polygon) -> Polygon:
     return orient(scale(poly, -1, 1, origin=((x0 + x1) / 2, 0)), 1.0)
 
 
+def cutting_face(outline: Polygon, spread: float = 0.0, min_convex_r: float = 1.5,
+                 min_concave_r: float = 2.5) -> Polygon:
+    """The blade's inner face: the outline shrunk by the dough spread.
+
+    Shrinking makes outward points sharper by the same amount, so the shrunk
+    outline is rounded to the minimum radii again.
+    """
+    poly = orient(outline, 1.0)
+    if not spread:
+        return poly
+    shrunk = poly.buffer(-spread, join_style=1)
+    try:
+        if shrunk.is_empty or shrunk.geom_type != "Polygon":
+            raise OutlineError
+        return _exact(shrunk, min_convex_r, min_concave_r, 0.5)
+    except OutlineError:
+        raise ValueError("dough spread is too large for this cookie") from None
+
+
 def build_cutter(outline: Polygon, params: CutterParams | None = None) -> trimesh.Trimesh:
     """Cutter mesh, printed base-down with the blade up.
 
@@ -126,11 +147,7 @@ def build_cutter(outline: Polygon, params: CutterParams | None = None) -> trimes
     """
     p = params or CutterParams()
     p.validate()
-    inner = mirrored(orient(outline, 1.0))
-    if p.spread:
-        inner = inner.buffer(-p.spread, join_style=1)
-        if inner.is_empty or inner.geom_type != "Polygon":
-            raise ValueError("dough spread is too large for this cookie")
+    inner = mirrored(cutting_face(outline, p.spread))
     parts = [_slab(inner, p.wall_base + p.flange_w, 0.0, p.flange_h)]
     parts += [_slab(inner, off, z0, z1) for z0, z1, off in blade_profile(p)]
     solid = m3d.Manifold.batch_boolean(parts, m3d.OpType.Add).to_mesh()
@@ -157,9 +174,7 @@ def build_pusher(outline: Polygon, params: CutterParams | None = None,
     p = params or CutterParams()
     q = pusher or PusherParams()
     notes = []
-    inner = orient(outline, 1.0)
-    if p.spread:
-        inner = inner.buffer(-p.spread, join_style=1)
+    inner = cutting_face(outline, p.spread)
     # shrink, then drop slivers narrower than 2 mm that would snap off
     plate = inner.buffer(-q.clearance, join_style=1).buffer(-1.0).buffer(1.0, join_style=1)
     if plate.is_empty:
@@ -172,10 +187,11 @@ def build_pusher(outline: Polygon, params: CutterParams | None = None,
     r = min(q.knob_d / 2, room - 1.0)
     if r < 2.5:
         raise ValueError("this cookie is too narrow for a pusher knob")
+    flare_r = min(r + 2.0, room - 0.5)  # the flare stays on the plate
     knob_h = p.height - q.plate_h + q.knob_above
     base = m3d.Manifold.extrude(_cross_section(plate), q.plate_h)
     # knob flares into the plate so it doesn't snap at the joint
-    flare = m3d.Manifold.cylinder(2.0, r + 2.0, r, 48).translate((centre.x, centre.y, q.plate_h))
+    flare = m3d.Manifold.cylinder(2.0, flare_r, r, 48).translate((centre.x, centre.y, q.plate_h))
     knob = m3d.Manifold.cylinder(knob_h, r, r, 48).translate((centre.x, centre.y, q.plate_h))
     solid = m3d.Manifold.batch_boolean([base, flare, knob], m3d.OpType.Add).to_mesh()
     return trimesh.Trimesh(solid.vert_properties[:, :3], solid.tri_verts), notes
