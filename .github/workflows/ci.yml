@@ -46,6 +46,18 @@ jobs:
           # the saved-designs folder must be writable by the image's user
           curl -sf localhost:8080/api/designs | grep -q '^\[\]$' && docker exec cs test -w /data/designs \
             || { docker logs cs; exit 1; }
+      # a version tag must match both version fields and have notes, before anything is published
+      - name: Check the release tag
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          test -f "docs/releases/$TAG.md" || { echo "missing docs/releases/$TAG.md"; exit 1; }
+          py=$(grep -m1 '^version' pyproject.toml | cut -d'"' -f2)
+          pkg=$(grep -m1 '^__version__' cuttersnap/__init__.py | cut -d'"' -f2)
+          if [ "$py" != "${TAG#v}" ] || [ "$pkg" != "${TAG#v}" ]; then
+            echo "pyproject.toml ($py) and cuttersnap/__init__.py ($pkg) must both say ${TAG#v}"; exit 1
+          fi
       - name: Log in to GitHub Container Registry
         if: github.event_name == 'push'
         uses: docker/login-action@v3
@@ -79,10 +91,4 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
-        run: |
-          notes="docs/releases/$TAG.md"
-          if [ ! -f "$notes" ]; then echo "missing $notes"; exit 1; fi
-          if [ "$(grep -m1 '^version' pyproject.toml | cut -d'"' -f2)" != "${TAG#v}" ]; then
-            echo "pyproject.toml version does not match $TAG"; exit 1
-          fi
-          gh release create "$TAG" --title "CutterSnap $TAG" --notes-file "$notes" --verify-tag
+        run: gh release create "$TAG" --title "CutterSnap $TAG" --notes-file "docs/releases/$TAG.md" --verify-tag
