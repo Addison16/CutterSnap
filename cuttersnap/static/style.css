@@ -25,3 +25,9 @@ canvas { max-width: 100%; display: block; touch-action: none; border-radius: 6px
 #settings input, #settings select { width: 110px; font: inherit; }
 #status { color: var(--muted); min-height: 1.5em; }
 #preview { height: 340px; border-radius: 6px; overflow: hidden; }
+.presets { display: flex; gap: 6px; flex-wrap: wrap; margin: -2px 0 8px; }
+.presets button { font-size: .85rem; padding: 3px 8px; }
+#report { margin: 4px 0 8px; padding-left: 0; list-style: none; color: var(--muted); }
+#report .bad { color: #c0392b; }
+#care { margin-top: 12px; color: var(--muted); }
+#care summary { cursor: pointer; color: var(--ink); }

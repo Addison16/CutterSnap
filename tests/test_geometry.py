@@ -100,3 +100,12 @@ def test_dough_spread_shrinks_cutting_face():
     mesh = build_cutter(outline, CutterParams(spread=1.0))
     r = np.linalg.norm(mesh.vertices[:, :2], axis=1)
     assert r.min() == pytest.approx(39, abs=0.05)
+
+
+@pytest.mark.parametrize("size", [50, 75, 90, 100])
+def test_radius_minimums_met_at_every_preset_size(star_photo, size):
+    from cuttersnap.outline import check_outline, mask_to_outline
+
+    _, truth = star_photo
+    c = check_outline(mask_to_outline(truth, size).polygon)
+    assert c["min_convex_radius_mm"] >= 1.5 and c["min_concave_radius_mm"] >= 2.5, c

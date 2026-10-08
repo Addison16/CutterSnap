@@ -156,6 +156,8 @@ function resetCutter() {
   state.outline = null; state.outlineMm = null;
   for (const id of ['make', 'edit', 'save']) $(id).disabled = true;
   $('download').classList.add('hidden');
+  $('download-pusher').classList.add('hidden');
+  showReport([]);
 }
 $('clear').addEventListener('click', () => {
   state.rect = null; state.fg = []; state.bg = []; state.edge = []; resetCutter(); draw();
@@ -209,11 +211,45 @@ async function trace() {
     state.outline = data.outline_px; state.outlineMm = data.outline_mm;
     draw();
     for (const id of ['make', 'edit', 'save']) $(id).disabled = false;
-    setStatus(`Outline is ${data.width_mm} × ${data.height_mm} mm. ` + (state.edge.length >= 3
+    state.check = data.check;
+    showReport(outlineReport());
+    setStatus((state.edge.length >= 3
       ? 'Drag or add yellow points where it misses the edge.'
       : 'Wrong edge? Add cookie / not cookie clicks and trace again, or use Edit as points.'));
   } catch (e) { if (seq === state.traceSeq) { resetCutter(); draw(); setStatus(`Could not trace: ${e.message}`); } }
 }
+// what the finished cookie will measure, and what the checks found
+function outlineReport() {
+  if (!state.outlineMm) return [];
+  const xs = state.outlineMm.map((p) => p[0]), ys = state.outlineMm.map((p) => p[1]);
+  const spread = +$('spread').value || 0;
+  const w = Math.max(...xs) - Math.min(...xs) - 2 * spread, h = Math.max(...ys) - Math.min(...ys) - 2 * spread;
+  const c = state.check || {};
+  const lines = [[`Cookie (inside of the cutter): ${w.toFixed(1)} × ${h.toFixed(1)} mm` + (spread ? `, after ${spread} mm dough spread` : ''), true]];
+  if (c.min_convex_radius_mm != null) {
+    lines.push([`Sharpest point rounded to ${c.min_convex_radius_mm} mm radius (minimum 1.5) and tightest notch ${c.min_concave_radius_mm} mm (minimum 2.5)`, c.ok]);
+  }
+  return lines;
+}
+function showReport(lines) {
+  const ul = $('report');
+  ul.replaceChildren(...lines.map(([text, ok]) => {
+    const li = document.createElement('li');
+    li.textContent = (ok ? '✓ ' : '✗ ') + text;
+    if (!ok) li.className = 'bad';
+    return li;
+  }));
+  ul.classList.toggle('hidden', !lines.length);
+}
+
+document.querySelectorAll('[data-size]').forEach((b) => b.addEventListener('click', () => {
+  $('size').value = b.dataset.size;
+  $('size').dispatchEvent(new Event('change'));
+}));
+// the outline is traced at a size, so a new size means a new trace
+$('size').addEventListener('change', () => { if (state.outlineMm && state.img) trace(); });
+$('spread').addEventListener('change', () => { if (state.outlineMm) showReport(outlineReport()); });
+
 $('trace').addEventListener('click', async () => {
   $('trace').disabled = true;
   await trace();
@@ -224,25 +260,34 @@ $('make').addEventListener('click', async () => {
   if (!state.outlineMm) return;
   setStatus('Building cutter…'); $('make').disabled = true;
   try {
-    const res = await fetch('/api/cutter', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        outline_mm: state.outlineMm, nozzle_mm: +$('nozzle').value,
-        height: +$('height').value, flange_w: +$('flange').value, spread: +$('spread').value,
-      }),
+    const body = JSON.stringify({
+      outline_mm: state.outlineMm, nozzle_mm: +$('nozzle').value,
+      height: +$('height').value, flange_w: +$('flange').value, spread: +$('spread').value,
     });
+    const post = (url) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
+    const [res, pres] = await Promise.all([post('/api/cutter'), post('/api/pusher')]);
     if (!res.ok) throw new Error(await apiError(res));
     const blob = await res.blob();
-    const link = $('download');
-    if (link.href) URL.revokeObjectURL(link.href);
-    link.href = URL.createObjectURL(blob);
-    link.classList.remove('hidden');
+    setLink($('download'), blob);
     showPreview(await blob.arrayBuffer());
-    const warn = res.headers.get('X-CutterSnap-Warning');
-    setStatus('Cutter ready. Print it base-down with no supports.' + (warn ? ` Note: ${warn}` : ''));
+    const notes = [res.headers.get('X-CutterSnap-Warning')];
+    if (pres.ok) setLink($('download-pusher'), await pres.blob());
+    else notes.push(`No pusher plate: ${await apiError(pres)}.`);
+    if (pres.ok && pres.headers.get('X-CutterSnap-Warning')) notes.push(pres.headers.get('X-CutterSnap-Warning'));
+    const [w, h] = (res.headers.get('X-CutterSnap-Size') || '').split('x');
+    showReport([...outlineReport(),
+      [`Cutter footprint with its base: ${w} × ${h} mm, ${$('height').value} mm tall`, true],
+      ['Cutter is one solid, watertight piece', true]]);
+    setStatus('Cutter ready. Print it base-down with no supports.' + notes.filter(Boolean).map((n) => ` Note: ${n}`).join(''));
   } catch (e) { setStatus(`Could not build cutter: ${e.message}`); }
   $('make').disabled = false;
 });
+
+function setLink(link, blob) {
+  if (link.href) URL.revokeObjectURL(link.href);
+  link.href = URL.createObjectURL(blob);
+  link.classList.remove('hidden');
+}
 
 // ---- project files -----------------------------------------------------------
 const SETTINGS = { nozzle_mm: 'nozzle', height: 'height', flange_w: 'flange', spread: 'spread' };
