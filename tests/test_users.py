@@ -177,3 +177,14 @@ def test_reset_password_from_the_command_line(client, monkeypatch, capsys):
     users.main(["list"])
     assert "baker  (admin)" in capsys.readouterr().out
     assert library.designs(users.first_admin_id()) == []
+
+
+def test_a_save_that_finishes_after_its_account_is_deleted_leaves_nothing(client, tmp_path):
+    other = TestClient(app)
+    _signup(other, "neighbour")
+    nid = other.get("/api/me").json()["user"]["id"]
+    client.delete(f"/api/admin/users/{nid}")
+    # the request had already passed sign-in when the account went
+    with pytest.raises(ValueError, match="no longer exists"):
+        library.save(nid, "Late", PROJECT)
+    assert list((tmp_path / "designs").glob("*.json")) == []

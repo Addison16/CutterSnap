@@ -49,6 +49,11 @@ def save(owner: int, name: str, project: dict) -> dict:
     tmp = folder() / f".{design_id}.tmp"
     tmp.write_text(json.dumps(entry))
     tmp.replace(_path(design_id))
+    # checked after writing: deleting an account removes the user before their designs, so a
+    # save racing the deletion is either swept up by it or sees the user gone here
+    if users.get(owner) is None:
+        _path(design_id).unlink(missing_ok=True)
+        raise ValueError("this account no longer exists")
     return _summary(entry)
 
 
