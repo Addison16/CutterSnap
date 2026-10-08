@@ -3,18 +3,53 @@
 Turn a photo of a cookie into a sturdy, smooth, 3D-printable cookie cutter.
 Self-hosted in Docker. Classical computer vision only: no AI models, no cloud calls.
 
-## Run it
+## Install with Docker
+
+CutterSnap ships as a ready-made image for 64-bit PCs, Macs and Raspberry Pis
+(`linux/amd64` and `linux/arm64`), so there is nothing to build.
+
+**Docker run.** One command:
 
 ```sh
-docker compose up -d --build
+docker run -d --name cuttersnap --restart unless-stopped \
+  -p 8080:8080 -v cuttersnap-designs:/data \
+  ghcr.io/addison16/cuttersnap:latest
 ```
 
-Then open http://localhost:8080. It works on a phone too: open the same address from any
-phone on your home Wi-Fi (for example http://192.168.1.20:8080), take the photo there, and
+**Docker Compose.** Save this as `compose.yaml` and run `docker compose up -d`:
+
+```yaml
+services:
+  cuttersnap:
+    image: ghcr.io/addison16/cuttersnap:latest
+    ports:
+      - "8080:8080"
+    volumes:
+      - designs:/data   # saved designs survive updates
+    restart: unless-stopped
+
+volumes:
+  designs:
+```
+
+Then open http://localhost:8080.
+
+- **Port.** To use another port, change the left number, for example `-p 9000:8080`.
+- **Saved designs** live in the volume mounted at `/data`. Keep the `-v` (or `volumes:`) line
+  and they survive updates and restarts.
+- **Pin a version** with `:0.1.0` instead of `:latest` if you want updates only when you choose.
+- **Update** with `docker pull ghcr.io/addison16/cuttersnap:latest`, then remove and re-run the
+  container (`docker compose pull && docker compose up -d` with Compose). Your designs stay.
+- **Build it yourself** from a clone instead: `docker compose up -d --build`.
+
+**On your phone.** Open the same address from any phone on your home Wi-Fi, using the
+computer's local address (for example http://192.168.1.20:8080), take the photo there, and
 **Save to my designs**. The design then waits under **My designs** on every device that opens
-this CutterSnap, ready to download on the computer next to your printer. Saved designs live
-in the `designs` Docker volume, so they survive updates. There are no accounts: anyone who
-can open the page can see the saved designs, so keep it on your home network.
+this CutterSnap, ready to download on the computer next to your printer. There are no
+accounts: anyone who can open the page can see and delete the saved designs, so keep
+CutterSnap on your home network and don't expose port 8080 to the internet.
+
+## Use it
 
 1. Choose a photo. Phone screenshots of cookie trays work too.
 2. Draw a box around the cookie you want. On busy or low-contrast photos, add a
@@ -153,6 +188,15 @@ pip install -e '.[dev]'
 pytest
 uvicorn cuttersnap.api:app --reload --port 8080
 ```
+
+## Releasing
+
+1. Set the version in `pyproject.toml` and `cuttersnap/__init__.py`.
+2. Write the notes in `docs/releases/vX.Y.Z.md`.
+3. Push a tag: `git tag v0.1.0 && git push origin v0.1.0`.
+
+CI then tests the code, publishes `ghcr.io/addison16/cuttersnap` as `0.1.0`, `0.1` and
+`latest` for amd64 and arm64, and creates the GitHub release from the notes file.
 
 ## Status
 
