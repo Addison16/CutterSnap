@@ -147,7 +147,13 @@ async def stamp_lines(
     try:
         f = json.loads(frame)
         ppm, origin = float(f["px_per_mm"]), tuple(float(v) for v in f["origin_px"])
-        outline = Outline(Polygon(json.loads(outline_mm)), ppm, origin)
+        poly = Polygon(json.loads(outline_mm))
+        x0, y0, x1, y1 = poly.bounds
+        # the photo is resampled to 6 px/mm, so these bound the work image size
+        if not (np.isfinite([ppm, *origin, x0, y0, x1, y1]).all() and 0.5 <= ppm <= 1000
+                and max(x1 - x0, y1 - y0) <= 300):
+            raise ValueError("frame out of range")
+        outline = Outline(poly, ppm, origin)
     except (ValueError, TypeError, KeyError) as e:
         raise HTTPException(400, "outline_mm and frame must come from /api/trace") from e
     if not 0.8 <= line_mm <= 3:

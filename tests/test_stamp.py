@@ -76,6 +76,12 @@ def test_stamp_endpoints():
     assert trimesh.load(trimesh.util.wrap_as_stream(res.content), file_type="stl").is_watertight
     res = client.post("/api/stamp", json={"outline_mm": tr["outline_mm"], "lines_mm": []})
     assert res.status_code == 400
+    # a made-up frame scale must not blow up the resampled photo
+    for ppm in (0, 1e-6, float("nan")):
+        frame = {**tr["frame"], "px_per_mm": ppm}
+        res = client.post("/api/stamp-lines", files={"image": ("c.png", png, "image/png")},
+                          data={"outline_mm": json.dumps(tr["outline_mm"]), "frame": json.dumps(frame)})
+        assert res.status_code == 400
 
 
 def test_stamp_needs_lines():

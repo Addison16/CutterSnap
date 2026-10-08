@@ -306,8 +306,9 @@ $('spread').addEventListener('change', refreshCheck);
 async function findStampLines() {
   const on = $('stamp-on').checked;
   $('erase-tool').classList.toggle('hidden', !on);
-  if (!on || !state.frame || !state.file) { draw(); return; }
   const seq = ++state.stampSeq;
+  if (!on || !state.frame || !state.file) { stampBusy(false); draw(); return; }
+  stampBusy(true);  // Make and Save wait for the lines, or the stamp would be left out
   const form = new FormData();
   form.append('image', state.file);
   form.append('outline_mm', JSON.stringify(state.outlineMm));
@@ -324,6 +325,10 @@ async function findStampLines() {
     draw();
     if (!data.lines_mm.length) setStatus('No icing lines found for a stamp. Try more stamp detail.');
   } catch (e) { if (seq === state.stampSeq) setStatus(`Could not find stamp lines: ${e.message}`); }
+  if (seq === state.stampSeq) stampBusy(false);
+}
+function stampBusy(busy) {
+  for (const id of ['make', 'save']) $(id).disabled = busy || !state.outlineMm;
 }
 let stampTimer;
 for (const id of ['stamp-on', 'stamp-level', 'stamp-line']) {
