@@ -79,12 +79,17 @@ def designs() -> list[dict]:
     return sorted(out, key=lambda e: -e["saved_at"])
 
 
+def _has_stamp(stamp: dict) -> bool:
+    # lines found earlier can stay in a project whose stamp was then switched off
+    return bool(stamp.get("on", True) and stamp.get("lines_mm"))
+
+
 def _summary(entry: dict) -> dict:
     p = entry["project"]
     pts = p["outline_mm"]
     step = max(1, len(pts) // 60)
     return {
         "id": entry["id"], "name": entry["name"], "saved_at": entry["saved_at"],
-        "size_mm": p.get("size_mm"), "stamp": bool((p.get("stamp") or {}).get("lines_mm")),
+        "size_mm": p.get("size_mm"), "stamp": _has_stamp(p.get("stamp") or {}),
         "thumb_mm": [[round(x, 1), round(y, 1)] for x, y in pts[::step]],
     }

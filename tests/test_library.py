@@ -41,6 +41,13 @@ def test_saved_design_downloads_from_any_device(client, star_photo):
     assert client.get("/api/designs").json() == []
 
 
+def test_switched_off_stamp_is_not_offered(client, star_photo):
+    proj = _project(star_photo, client)
+    proj["stamp"] = {"on": False, "lines_mm": [[[[30, 30], [40, 30], [40, 40]]]]}
+    saved = client.post("/api/designs", json={"name": "x", "project": proj}).json()
+    assert not saved["stamp"]
+
+
 def test_library_refuses_bad_input(client):
     assert client.get("/api/designs/../../etc/passwd").status_code == 404
     assert client.get("/api/designs/zzzz").status_code == 404

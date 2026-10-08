@@ -38,11 +38,11 @@ def main(argv: list[str] | None = None) -> None:
                     help="x,y on the cookie's edge; 3 or more, in order around it")
     ap.add_argument("--size", type=float, default=90.0, help="longest side in mm (default 90)")
     ap.add_argument("--nozzle", type=float, default=0.4, help="printer nozzle in mm (default 0.4)")
-    ap.add_argument("--spread", type=float, default=0.0,
+    ap.add_argument("--spread", type=float,
                     help="shrink the cutter by this many mm to undo dough spreading (default 0)")
-    ap.add_argument("--halo", type=float, default=0.0,
+    ap.add_argument("--halo", type=float,
                     help="grow the cutter by this many mm for a bubble border (default 0)")
-    ap.add_argument("--initials", default="", help="up to 3 letters pressed into the underside of the base")
+    ap.add_argument("--initials", help="up to 3 letters pressed into the underside of the base")
     ap.add_argument("--flip", action="store_true", help="mirror image, for the other one of a pair")
     ap.add_argument("--preview", help="also write a JPEG of the photo with the traced outline")
     ap.add_argument("--save-project", help="also write a .json project file")
@@ -57,9 +57,11 @@ def main(argv: list[str] | None = None) -> None:
     if a.photo.lower().endswith(".json"):
         proj = Project.load(a.photo)
         # options given on the command line change the saved settings
-        for opt, key in (("halo", "halo"), ("initials", "text"), ("flip", "flip"), ("spread", "spread")):
-            if getattr(a, opt):
+        for opt, key in (("halo", "halo"), ("initials", "text"), ("spread", "spread")):
+            if getattr(a, opt) is not None:  # given, even as 0 or ""
                 setattr(proj, key, getattr(a, opt))
+        if a.flip:
+            proj.flip = True
     else:
         img = cv2.imread(a.photo)
         if img is None:
@@ -75,7 +77,7 @@ def main(argv: list[str] | None = None) -> None:
                        size_mm=a.size, photo_name=a.photo, photo_sha256=sha256_file(a.photo),
                        box=list(box) if box else None, cookie=[list(p) for p in a.cookie],
                        not_cookie=[list(p) for p in a.not_cookie], edge=[list(p) for p in a.edge],
-                       nozzle_mm=a.nozzle, spread=a.spread, halo=a.halo, text=a.initials,
+                       nozzle_mm=a.nozzle, spread=a.spread or 0.0, halo=a.halo or 0.0, text=a.initials or "",
                        flip=a.flip, stamp_lines_mm=rings(lines) if lines is not None else [],
                        stamp_depth=a.stamp_depth)
         if a.preview:

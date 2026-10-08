@@ -40,3 +40,9 @@ def test_project_options_on_the_command_line(tmp_path, capsys):
 
     a, b = trimesh.load(tmp_path / "a.stl"), trimesh.load(tmp_path / "b.stl")
     assert b.extents[0] == pytest.approx(a.extents[0] + 6, abs=0.3)
+    # a saved setting can be put back to zero or empty from the command line
+    p = Project.load(tmp_path / "c.json")
+    p.halo, p.text = 3.0, "AH"
+    p.save(tmp_path / "d.json")
+    main([str(tmp_path / "d.json"), str(tmp_path / "e.stl"), "--halo", "0", "--initials", ""])
+    assert (tmp_path / "e.stl").read_bytes() == (tmp_path / "a.stl").read_bytes()
