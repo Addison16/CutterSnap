@@ -3,24 +3,31 @@ from __future__ import annotations
 
 import io
 import json
+import re
 from pathlib import Path
 
 import numpy as np
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from PIL import Image, ImageOps
 from pydantic import BaseModel, Field
-from shapely.affinity import scale
 from shapely.geometry import Polygon
 from shapely.ops import orient
 
-from . import __version__
-from .bundle import size_set
-from .cutter import (CutterParams, PusherParams, build_cutter, build_pusher, cutting_face,
-                     facet_error_mm)
+from . import __version__, library
+from .cutter import (
+    CutterParams,
+    PusherParams,
+    build_cutter,
+    build_pusher,
+    cutting_face,
+    facet_error_mm,
+    flipped,
+)
 from .livewire import edge_mask
 from .outline import Outline, OutlineError, check_outline, mask_to_outline
+from .project import Project
 from .segment import segment
 from .stamp import StampParams, build_stamp, detail_lines, from_rings, rings
 
@@ -183,7 +190,7 @@ class CutterRequest(BaseModel):
     tip_mm: float | None = Field(None, ge=0.3, le=2.0)
     spread: float = Field(0.0, ge=0, le=5)
     halo: float = Field(0.0, ge=0, le=20)        # grow the outline: a bubble border
-    text: str = Field("", max_length=16)          # pressed into the underside of the base
+    text: str = Field("", max_length=3)           # initials pressed into the underside of the base
     flip: bool = False                            # mirror image, for left/right pairs
     clearance: float = Field(2.0, ge=0.5, le=5)  # pusher plate gap, all round
 
@@ -200,14 +207,6 @@ def _request_geometry(req: CutterRequest) -> tuple[Polygon, CutterParams]:
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
     return (flipped(poly) if req.flip else orient(poly, 1.0)), params
-
-
-def flipped(geom, about: Polygon | None = None):
-    """Left-right mirror about the centre of `about` (default: geom itself),
-    for the other one of a pair, like left and right mittens."""
-    x0, _, x1, _ = (about or geom).bounds
-    out = scale(geom, -1, 1, origin=((x0 + x1) / 2, 0))
-    return orient(out, 1.0) if isinstance(out, Polygon) else out
 
 
 def _stl(mesh, filename: str, notes: list[str]) -> Response:
@@ -264,18 +263,69 @@ def stamp(req: StampRequest) -> Response:
     return _stl(mesh, "cookie-stamp.stl", [])
 
 
-@app.post("/api/set")
-def size_set_zip(req: CutterRequest) -> Response:
-    """The cutter and pusher at 5, 7.5 and 10 cm, with a print card, as a zip."""
-    poly, params = _request_geometry(req)
+# ---- saved designs -------------------------------------------------------------
+MAX_DESIGN_BYTES = 2 * 1024 * 1024
+
+
+@app.get("/api/designs")
+def list_designs() -> list[dict]:
+    return library.designs()
+
+
+@app.post("/api/designs")
+async def save_design(request: Request) -> dict:
+    """Save a project (as written by Save project) under a name."""
+    body = b""
+    async for chunk in request.stream():
+        body += chunk
+        if len(body) > MAX_DESIGN_BYTES:
+            raise HTTPException(413, "design is too large")
     try:
-        data, notes = size_set(poly, params, req.nozzle_mm)
+        data = json.loads(body)
+        return library.save(data.get("name", ""), data["project"])
+    except (ValueError, KeyError, TypeError, AttributeError) as e:
+        raise HTTPException(400, f"could not save this design: {e}") from e
+
+
+@app.get("/api/designs/{design_id}")
+def get_design(design_id: str) -> dict:
+    try:
+        return library.load(design_id)
+    except KeyError:
+        raise HTTPException(404, "no such design") from None
+
+
+@app.delete("/api/designs/{design_id}")
+def delete_design(design_id: str) -> dict:
+    try:
+        library.delete(design_id)
+    except KeyError:
+        raise HTTPException(404, "no such design") from None
+    return {"ok": True}
+
+
+@app.get("/api/designs/{design_id}/{kind}.stl")
+def design_stl(design_id: str, kind: str) -> Response:
+    """Build a saved design's cutter, pusher or stamp at its saved size."""
+    if kind not in ("cutter", "pusher", "stamp"):
+        raise HTTPException(404, "no such part")
+    try:
+        entry = library.load(design_id)
+        proj = Project.from_json(entry["project"])
+        poly, params = proj.polygon(), proj.params()
+        notes: list[str] = []
+        if kind == "cutter":
+            mesh = build_cutter(poly, params, notes)
+        elif kind == "pusher":
+            mesh, notes = build_pusher(poly, params)
+        else:
+            mesh = build_stamp(poly, proj.stamp_lines(), params, StampParams(relief_h=proj.stamp_depth))
+    except KeyError:
+        raise HTTPException(404, "no such design") from None
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
-    headers = {"Content-Disposition": 'attachment; filename="cookie-cutter-set.zip"'}
-    if notes:
-        headers["X-CutterSnap-Warning"] = " ".join(notes)
-    return Response(data, media_type="application/zip", headers=headers)
+    slug = re.sub(r"[^a-z0-9]+", "-", entry["name"].lower()).strip("-") or "cookie"
+    return _stl(mesh, f"{slug}-{kind}.stl", notes)
 
 
 @app.post("/api/pusher")

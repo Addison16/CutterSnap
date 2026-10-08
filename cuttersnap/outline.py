@@ -185,8 +185,12 @@ def _rules(poly: Polygon, min_convex_r: float, min_concave_r: float, spacing_mm:
     poly = _largest(poly.buffer(-min_convex_r, join_style=1).buffer(min_convex_r, join_style=1))
     poly = _largest(poly.buffer(min_concave_r, join_style=1).buffer(-min_concave_r, join_style=1))
     poly = orient(poly.simplify(0.05), 1.0)
+    # resample evenly first: a spline through a long straight side with only
+    # its two end points (as simplify leaves it) bulges far off the shape
+    ring = poly.exterior
+    m = max(64, int(ring.length / spacing_mm))
+    p = np.array([ring.interpolate(d).coords[0] for d in np.linspace(0, ring.length, m, endpoint=False)])
     # periodic smoothing spline -> evenly spaced points, no kinks
-    p = np.array(poly.exterior.coords)[:-1]
     tck, _ = splprep([p[:, 0], p[:, 1]], s=len(p) * 0.004, per=True)
     n = max(64, int(poly.length / spacing_mm))
     x, y = splev(np.linspace(0, 1, n, endpoint=False), tck)

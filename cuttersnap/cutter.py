@@ -31,7 +31,7 @@ from .outline import OutlineError, _exact, facet_error
 CHAMFER_SLICES = 6
 TAPER_SLICES = 16
 QUAD_SEGS = 16    # arc segments per quarter circle where the blade rounds a point
-TEXT_MAX = 16
+TEXT_MAX = 3      # initials
 TEXT_DEPTH = 0.6   # base text is pressed this deep into the underside
 TEXT_STROKE = 0.6  # letter stroke width, about one and a half 0.4 mm lines
 
@@ -78,7 +78,7 @@ class CutterParams:
         if min(self.height, self.flange_h, self.flange_w, self.fillet) <= 0 or min(self.spread, self.halo) < 0:
             raise ValueError("dimensions must be positive")
         if len(self.text) > TEXT_MAX or not all(" " <= ch <= "~" for ch in self.text):
-            raise ValueError(f"base text must be up to {TEXT_MAX} plain letters, digits or symbols")
+            raise ValueError(f"initials must be up to {TEXT_MAX} plain letters or digits")
 
     def as_dict(self) -> dict:
         return asdict(self)
@@ -127,6 +127,14 @@ def mirrored(poly: Polygon) -> Polygon:
     """Left-right mirror image, in place."""
     x0, _, x1, _ = poly.bounds
     return orient(scale(poly, -1, 1, origin=((x0 + x1) / 2, 0)), 1.0)
+
+
+def flipped(geom, about: Polygon | None = None):
+    """Left-right mirror about the centre of `about` (default: geom itself),
+    for the other one of a pair, like left and right mittens."""
+    x0, _, x1, _ = (geom if about is None else about).bounds
+    out = scale(geom, -1, 1, origin=((x0 + x1) / 2, 0))
+    return orient(out, 1.0) if isinstance(out, Polygon) else out
 
 
 def cutting_face(outline: Polygon, spread: float = 0.0, halo: float = 0.0,
@@ -252,7 +260,7 @@ def build_cutter(outline: Polygon, params: CutterParams | None = None,
         label = place_text(face, p)
         if label is None:
             if notes is not None:
-                notes.append("The base text did not fit; try fewer letters or a wider base.")
+                notes.append("The initials did not fit on the base; try fewer letters or a wider base.")
         else:
             x0, _, x1, _ = face.bounds
             label = scale(label, -1, 1, origin=((x0 + x1) / 2, 0))  # same mirror as the face

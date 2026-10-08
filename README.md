@@ -9,7 +9,12 @@ Self-hosted in Docker. Classical computer vision only: no AI models, no cloud ca
 docker compose up -d --build
 ```
 
-Then open http://localhost:8080.
+Then open http://localhost:8080. It works on a phone too: open the same address from any
+phone on your home Wi-Fi (for example http://192.168.1.20:8080), take the photo there, and
+**Save to my designs**. The design then waits under **My designs** on every device that opens
+this CutterSnap, ready to download on the computer next to your printer. Saved designs live
+in the `designs` Docker volume, so they survive updates. There are no accounts: anyone who
+can open the page can see the saved designs, so keep it on your home network.
 
 1. Choose a photo. Phone screenshots of cookie trays work too.
 2. Draw a box around the cookie you want. On busy or low-contrast photos, add a
@@ -22,11 +27,21 @@ Then open http://localhost:8080.
    a matching plate 2 mm smaller all round with a knob: press it down through the cutter
    to push out dough that sticks in narrow parts.
 
+**Corners.** Orange rings on the photo show where the outline was rounded to the minimum
+point and notch radii, so you can see what changed from the photo.
+
+**More options.**
+- **Halo border** grows the cutter all round, for a "bubble" outline around the design.
+- **Initials on the base** presses up to 3 letters into the underside of the base, which
+  faces up when you cut. They follow the curve of the base, as low on the cookie as they fit.
+- **Mirror image** makes the other one of a pair, like left and right mittens.
+
 **Matching stamp.** Tick **Matching stamp** and the icing lines inside the cookie show in
 blue on the photo. **Stamp detail** finds fainter lines or gives a cleaner stamp, and
 **Erase stamp line** removes any line you don't want (crumbs, watermarks, shine). Make
 cutter then also offers **Download stamp**: a 4 mm plate that fits inside the cutter with
-1 mm clearance and the lines raised 2 mm. Print it flat side down. After cutting, press
+1.5 mm clearance (1 mm was too tight in other makers' stamps) and the lines raised 2 mm.
+**Stamp depth** raises them 1 to 4 mm, deeper for thicker dough. Print it flat side down. After cutting, press
 it into the dough inside the cutter to print the design.
 
 The cutter and stamp are built as mirror images, because both are turned over to use;
@@ -41,7 +56,7 @@ plate, stripes near the edge, a pale rim the same colour as the table):
   to add one there, and shift-click to remove one.
 - Or press **Edit as points** after an automatic trace to turn it into points you can drag.
 
-**Save project** writes a small `.json` file with the outline, your marks and the
+**Save project file** writes a small `.json` file with the outline, your marks and the
 settings. **Open project** loads it again, and **Make cutter** then rebuilds exactly the
 same cutter, even without the photo.
 
@@ -67,6 +82,12 @@ of the taper prints as two full loops right up to the top. Slightly wider edges
 (0.9 to 1 mm) did worse: classic mode filled the middle with a gap-fill line. OrcaSlicer
 was not tested; it uses the same Arachne generator by default.
 
+**Smooth curves.** A cutter is only as smooth as its STL: some cutter makers export coarse
+meshes whose flat facets show as ridges on round cutters. CutterSnap places outline points
+every 0.5 mm and rounds points with 16 segments per quarter circle, and the page reports how
+far the flat facets stray from the true curve (usually about 0.02 mm, far below one printed
+line). The check fails above 0.05 mm.
+
 The inside face of the blade sits exactly on the traced outline and is vertical, so the
 cookie comes out the size and shape you asked for. Every outline is checked for radius
 of curvature after smoothing, and every cutter is checked to be one watertight piece.
@@ -89,7 +110,9 @@ machine.
   and Edge points handle white-on-white cookies and striped icing.
 - **Pusher plate** for shapes where dough sticks, and a **matching stamp** made from the
   icing lines in the same photo.
-- **Project files** that rebuild the same STL, byte for byte.
+- **Project files** that rebuild the same STL, byte for byte, and **My designs**, so a cutter
+  made on your phone is waiting on the computer by your printer.
+- **A smoothness check** on the STL itself, not just the outline.
 - **Free, self-hosted, no accounts, no AI, nothing uploaded anywhere.**
 
 Printed cutters are not food-safe in any certified sense: layer lines hold on to dough.
@@ -116,8 +139,12 @@ pip install .
 cuttersnap photo.jpg cutter.stl --box 520,1060,350,380 --cookie 690,1250 --size 90 --preview check.jpg
 cuttersnap photo.jpg cutter.stl --edge 876,602 --edge 920,582 --edge 1031,655 ... --save-project heart.json
 cuttersnap heart.json cutter.stl --pusher pusher.stl   # rebuild a saved project, plus a pusher plate
-cuttersnap apple.jpg cutter.stl --box 520,1060,350,380 --stamp stamp.stl --stamp-detail 0.5
+cuttersnap apple.jpg cutter.stl --box 520,1060,350,380 --stamp stamp.stl --stamp-detail 0.5 --stamp-depth 3
+cuttersnap mitten.json right.stl --flip --initials AH --halo 3   # the other mitten of a pair
 ```
+
+With a `.json` project, `--spread`, `--halo`, `--initials` and `--flip` change its saved
+settings; without them it rebuilds exactly what was saved.
 
 ## Development
 
@@ -129,8 +156,9 @@ uvicorn cuttersnap.api:app --reload --port 8080
 
 ## Status
 
-Early. Planned next: a "this is dough" colour click, edge snapping for white-on-white
-cookies, draggable outline points, red-circle detection on screenshots, 3MF export,
-and saving projects as JSON.
+Early but complete: tracing, edge points, smooth outlines, a slice-tested blade, pusher plate,
+matching stamp, initials, project files and saved designs. Possible next steps: red-circle
+detection on phone screenshots, and an optional sign-in for instances shared beyond a home
+network.
 
 Licensed MIT. Bundles [three.js](https://threejs.org) (MIT) for the 3D preview.

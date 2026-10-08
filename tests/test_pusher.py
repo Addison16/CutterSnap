@@ -1,7 +1,6 @@
 from shapely.affinity import scale
 from shapely.geometry import Point, Polygon, box
-from shapely.ops import orient
-from shapely.ops import unary_union
+from shapely.ops import orient, unary_union
 
 from cuttersnap.cutter import CutterParams, PusherParams, build_pusher
 

@@ -12,15 +12,13 @@ from __future__ import annotations
 import argparse
 
 import cv2
-from shapely.geometry import Polygon
-from shapely.ops import orient
 
-from .cutter import CutterParams, build_cutter, build_pusher
+from .cutter import build_cutter, build_pusher, cutting_face, facet_error_mm
 from .livewire import edge_mask
 from .outline import check_outline, mask_to_outline
 from .project import Project, sha256_file
 from .segment import segment
-from .stamp import build_stamp, detail_lines, from_rings, rings
+from .stamp import StampParams, build_stamp, detail_lines, rings
 
 
 def _pt(s: str) -> tuple[int, int]:
@@ -42,17 +40,26 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--nozzle", type=float, default=0.4, help="printer nozzle in mm (default 0.4)")
     ap.add_argument("--spread", type=float, default=0.0,
                     help="shrink the cutter by this many mm to undo dough spreading (default 0)")
+    ap.add_argument("--halo", type=float, default=0.0,
+                    help="grow the cutter by this many mm for a bubble border (default 0)")
+    ap.add_argument("--initials", default="", help="up to 3 letters pressed into the underside of the base")
+    ap.add_argument("--flip", action="store_true", help="mirror image, for the other one of a pair")
     ap.add_argument("--preview", help="also write a JPEG of the photo with the traced outline")
     ap.add_argument("--save-project", help="also write a .json project file")
     ap.add_argument("--pusher", help="also write a pusher plate .stl (2 mm smaller, with a knob)")
     ap.add_argument("--stamp", help="also write a matching stamp .stl with the icing lines raised")
     ap.add_argument("--stamp-detail", type=float, default=0.5,
                     help="0 to 1: higher finds fainter icing lines (default 0.5)")
+    ap.add_argument("--stamp-depth", type=float, default=2.0,
+                    help="how far the stamp's lines stand up, 1 to 4 mm (default 2)")
     a = ap.parse_args(argv)
 
     if a.photo.lower().endswith(".json"):
         proj = Project.load(a.photo)
-        poly = orient(Polygon(proj.outline_mm).buffer(0), 1.0)
+        # options given on the command line change the saved settings
+        for opt, key in (("halo", "halo"), ("initials", "text"), ("flip", "flip"), ("spread", "spread")):
+            if getattr(a, opt):
+                setattr(proj, key, getattr(a, opt))
     else:
         img = cv2.imread(a.photo)
         if img is None:
@@ -68,35 +75,40 @@ def main(argv: list[str] | None = None) -> None:
                        size_mm=a.size, photo_name=a.photo, photo_sha256=sha256_file(a.photo),
                        box=list(box) if box else None, cookie=[list(p) for p in a.cookie],
                        not_cookie=[list(p) for p in a.not_cookie], edge=[list(p) for p in a.edge],
-                       nozzle_mm=a.nozzle, spread=a.spread,
-                       stamp_lines_mm=rings(lines) if lines is not None else [])
-        # build from the rounded outline, exactly as a reload of the project would
-        poly = orient(Polygon(proj.outline_mm).buffer(0), 1.0)
+                       nozzle_mm=a.nozzle, spread=a.spread, halo=a.halo, text=a.initials,
+                       flip=a.flip, stamp_lines_mm=rings(lines) if lines is not None else [],
+                       stamp_depth=a.stamp_depth)
         if a.preview:
             pts = outline.to_pixels().round().astype("int32").reshape(-1, 1, 2)
             cv2.polylines(img, [pts], True, (255, 0, 255), max(2, img.shape[1] // 300))
             cv2.imwrite(a.preview, img)
 
-    params = CutterParams.for_nozzle(proj.nozzle_mm, height=proj.height,
-                                     flange_w=proj.flange_w, spread=proj.spread)
-    mesh = build_cutter(poly, params)
+    # build from the project's rounded outline, exactly as a reload of it would
+    try:
+        poly, params = proj.polygon(), proj.params()
+    except ValueError as e:
+        ap.error(str(e))
+    notes: list[str] = []
+    mesh = build_cutter(poly, params, notes)
     mesh.export(a.out)
     if a.save_project:
         proj.save(a.save_project)
     if a.stamp:
         if not proj.stamp_lines_mm:
             ap.error("this project has no stamp lines; make the stamp from the photo")
-        build_stamp(poly, from_rings(proj.stamp_lines_mm), params).export(a.stamp)
+        build_stamp(poly, proj.stamp_lines(), params, StampParams(relief_h=proj.stamp_depth)).export(a.stamp)
     if a.pusher:
-        plate, notes = build_pusher(poly, params)
+        plate, pnotes = build_pusher(poly, params)
         plate.export(a.pusher)
-        for n in notes:
-            print(n)
+        notes += pnotes
+    for n in notes:
+        print(n)
     w, h, _ = mesh.extents
-    c = check_outline(poly)
+    c = check_outline(cutting_face(poly, params.spread, params.halo))
     print(f"{a.out}: {w:.1f} x {h:.1f} mm, watertight={mesh.is_watertight}, "
           f"tightest point radius {c['min_convex_radius_mm']} mm, "
-          f"tightest notch radius {c['min_concave_radius_mm']} mm")
+          f"tightest notch radius {c['min_concave_radius_mm']} mm, "
+          f"facets within {facet_error_mm(poly, params):.3f} mm of the curve")
 
 
 if __name__ == "__main__":
