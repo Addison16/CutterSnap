@@ -517,7 +517,130 @@ $('keep').addEventListener('click', async () => {
   } catch (e) { setStatus(`Could not save: ${e.message}`); }
   $('keep').disabled = !state.outlineMm;
 });
-loadDesigns();
+
+// ---- accounts: sign in, account menu, admin -----------------------------------
+let me = null, gateMode = 'login';
+// a session that ends (signed out elsewhere, password reset) brings back the sign-in screen
+const rawFetch = window.fetch.bind(window);
+window.fetch = async (url, opts) => {
+  const res = await rawFetch(url, opts);
+  if (res.status === 401 && me && !String(url).startsWith('/api/login')) { me = null; whoami(); }
+  return res;
+};
+const postJson = (url, body) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+
+async function whoami() {
+  let info;
+  try {
+    const res = await rawFetch('/api/me');
+    if (!res.ok) throw new Error(await apiError(res));
+    info = await res.json();
+  } catch (e) { $('gate').classList.remove('hidden'); $('gate-error').textContent = `CutterSnap is not answering: ${e.message}`; return; }
+  me = info.user;
+  $('gate').classList.toggle('hidden', !!me);
+  document.querySelector('main').classList.toggle('hidden', !me);
+  $('account').classList.toggle('hidden', !me);
+  if (me) {
+    $('who').textContent = me.username;
+    $('open-admin').classList.toggle('hidden', !me.is_admin);
+    loadDesigns();
+    return;
+  }
+  showGate(info.setup ? 'setup' : gateMode === 'signup' && info.signup_open ? 'signup' : 'login', info.signup_open);
+}
+function showGate(mode, signupOpen) {
+  gateMode = mode;
+  const text = {
+    setup: ['Create the admin account', 'This is a new CutterSnap. The first account runs it: it can add people, reset passwords and turn sign-up off. Designs saved before accounts existed become yours.', 'Create account'],
+    signup: ['Create an account', 'Your designs are kept on this CutterSnap and only you can see them.', 'Create account'],
+    login: ['Sign in', '', 'Sign in'],
+  }[mode];
+  [$('gate-title').textContent, $('gate-hint').textContent, $('gate-go').textContent] = text;
+  $('gate-pw').autocomplete = mode === 'login' ? 'current-password' : 'new-password';
+  $('gate-switch').classList.toggle('hidden', mode === 'setup' || (mode === 'login' && !signupOpen));
+  $('gate-mode').textContent = mode === 'login' ? 'Create an account' : 'I already have an account';
+  $('gate-error').textContent = '';
+}
+$('gate-mode').addEventListener('click', () => showGate(gateMode === 'login' ? 'signup' : 'login', true));
+$('gate-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  $('gate-go').disabled = true;
+  try {
+    const res = await rawFetch(gateMode === 'login' ? '/api/login' : '/api/signup', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: $('gate-user').value.trim(), password: $('gate-pw').value }) });
+    if (!res.ok) throw new Error(await apiError(res));
+    $('gate-pw').value = '';
+    await whoami();
+  } catch (err) { $('gate-error').textContent = err.message; }
+  $('gate-go').disabled = false;
+});
+$('sign-out').addEventListener('click', async () => {
+  await rawFetch('/api/logout', { method: 'POST' });
+  me = null;
+  $('account').open = false;
+  $('designs').replaceChildren();
+  whoami();
+});
+$('change-pw').addEventListener('click', () => {
+  $('account').open = false;
+  $('pw-form').reset();
+  $('pw-error').textContent = '';
+  $('pw-dialog').showModal();
+});
+$('pw-form').addEventListener('submit', async (e) => {
+  if (e.submitter?.value !== 'save') return;
+  e.preventDefault();
+  const res = await postJson('/api/password', { current: $('pw-current').value, password: $('pw-new').value });
+  if (!res.ok) { $('pw-error').textContent = await apiError(res); return; }
+  $('pw-dialog').close();
+  setStatus('Password changed. Other devices are signed out.');
+});
+
+async function loadUsers() {
+  const res = await fetch('/api/admin/users');
+  if (!res.ok) { $('admin-error').textContent = await apiError(res); return; }
+  const { users, signup_open } = await res.json();
+  $('signup-open').checked = signup_open;
+  $('users').replaceChildren(...users.map((u) => {
+    const li = document.createElement('li');
+    li.innerHTML = '<strong></strong><em></em>';
+    li.querySelector('strong').textContent = u.username;
+    li.querySelector('em').textContent = u.is_admin ? 'admin' : `since ${new Date(u.created_at * 1000).toLocaleDateString()}`;
+    const reset = Object.assign(document.createElement('button'), { textContent: 'Set password' });
+    reset.addEventListener('click', async () => {
+      const pw = prompt(`New password for ${u.username} (at least 8 characters). They will be signed out.`);
+      if (!pw) return;
+      const r = await postJson(`/api/admin/users/${u.id}/password`, { password: pw });
+      $('admin-error').textContent = r.ok ? `${u.username} has a new password.` : await apiError(r);
+    });
+    li.append(reset);
+    if (u.id !== me.id) {
+      const del = Object.assign(document.createElement('button'), { textContent: 'Delete' });
+      del.addEventListener('click', async () => {
+        if (!confirm(`Delete ${u.username} and all of their saved designs? This cannot be undone.`)) return;
+        const r = await fetch(`/api/admin/users/${u.id}`, { method: 'DELETE' });
+        $('admin-error').textContent = r.ok ? '' : await apiError(r);
+        loadUsers();
+      });
+      li.append(del);
+    }
+    return li;
+  }));
+}
+$('open-admin').addEventListener('click', () => {
+  $('account').open = false;
+  $('admin-error').textContent = '';
+  $('admin').showModal();
+  loadUsers();
+});
+$('signup-open').addEventListener('change', async () => {
+  const res = await postJson('/api/admin/signup', { signup_open: $('signup-open').checked });
+  if (!res.ok) $('admin-error').textContent = await apiError(res);
+  loadUsers();
+});
+document.addEventListener('click', (e) => { if (!$('account').contains(e.target)) $('account').open = false; });
+whoami();
 
 // phones rotate and resize: keep the photo fitted to the screen
 let fitTimer;

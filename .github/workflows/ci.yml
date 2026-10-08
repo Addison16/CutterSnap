@@ -43,8 +43,11 @@ jobs:
           # run it the way the README says, with the designs volume
           docker run -d --name cs -p 8080:8080 -v cuttersnap-designs:/data cuttersnap-local
           for i in $(seq 30); do curl -sf localhost:8080/api/health && break; sleep 2; done
-          # the saved-designs folder must be writable by the image's user
-          curl -sf localhost:8080/api/designs | grep -q '^\[\]$' && docker exec cs test -w /data/designs \
+          # the data folder must be writable by the image's user, and designs need a sign-in
+          curl -sf -c jar -H 'Content-Type: application/json' -d '{"username":"smoke","password":"smoke-test-pw"}' \
+              localhost:8080/api/signup \
+            && curl -sf -b jar localhost:8080/api/designs | grep -q '^\[\]$' && docker exec cs test -w /data/designs \
+            && test "$(curl -s -o /dev/null -w '%{http_code}' localhost:8080/api/designs)" = 401 \
             || { docker logs cs; exit 1; }
       # a version tag must match both version fields and have notes, before anything is published
       - name: Check the release tag

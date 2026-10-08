@@ -37,13 +37,9 @@ def test_pusher_needs_room_for_a_knob():
         build_pusher(Polygon([(0, 0), (80, 0), (80, 6), (0, 6)]))
 
 
-def test_pusher_endpoint():
-    from fastapi.testclient import TestClient
-
-    from cuttersnap.api import app
-
+def test_pusher_endpoint(client):
     outline = list(Point(0, 0).buffer(30, quad_segs=16).exterior.coords)[:-1]
-    res = TestClient(app).post("/api/pusher", json={"outline_mm": outline})
+    res = client.post("/api/pusher", json={"outline_mm": outline})
     assert res.status_code == 200, res.text
     assert res.headers["content-type"] == "model/stl"
     assert res.headers["x-cutterSnap-size"].startswith("56.")

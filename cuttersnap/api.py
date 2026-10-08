@@ -5,17 +5,18 @@ import io
 import json
 import re
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import numpy as np
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from PIL import Image, ImageOps
 from pydantic import BaseModel, Field
 from shapely.geometry import Polygon
 from shapely.ops import orient
 
-from . import __version__, library
+from . import __version__, library, users
 from .cutter import (
     CutterParams,
     PusherParams,
@@ -43,6 +44,142 @@ STATIC = Path(__file__).parent / "static"
 
 app = FastAPI(title="CutterSnap", version=__version__)
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
+
+# ---- accounts ------------------------------------------------------------------
+# everything under /api/ needs a signed-in user except these
+PUBLIC = {"/api/health", "/api/me", "/api/login", "/api/signup", "/api/logout"}
+
+
+@app.middleware("http")
+async def require_login(request: Request, call_next):
+    path = request.url.path
+    if request.method not in ("GET", "HEAD", "OPTIONS"):
+        # refuse writes started by another site (the cookie is SameSite=Lax too)
+        origin = request.headers.get("origin")
+        # a reverse proxy may rewrite Host; it then sends the original as X-Forwarded-Host
+        hosts = {request.headers.get("host"), request.headers.get("x-forwarded-host", "").split(",")[0].strip()}
+        if origin and urlsplit(origin).netloc not in hosts:
+            return JSONResponse({"detail": "cross-site request refused"}, status_code=403)
+    if path.startswith("/api/") and path not in PUBLIC:
+        user = users.session_user(request.cookies.get(users.COOKIE))
+        if user is None:
+            return JSONResponse({"detail": "please sign in"}, status_code=401)
+        if path.startswith("/api/admin/") and not user["is_admin"]:
+            return JSONResponse({"detail": "admins only"}, status_code=403)
+        request.state.user = user
+    return await call_next(request)
+
+
+def _uid(request: Request) -> int:
+    return request.state.user["id"]
+
+
+class Credentials(BaseModel):
+    username: str = Field(max_length=64)
+    password: str = Field(max_length=256)
+
+
+def _signed_in(request: Request, user: dict, token: str) -> JSONResponse:
+    res = JSONResponse({"user": user})
+    https = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
+    res.set_cookie(users.COOKIE, token, max_age=users.SESSION_DAYS * 86400, httponly=True,
+                   samesite="lax", secure=https, path="/")
+    return res
+
+
+@app.get("/api/me")
+def me(request: Request) -> dict:
+    """Who is signed in, and whether this CutterSnap still needs its first (admin) account."""
+    return {"user": users.session_user(request.cookies.get(users.COOKIE)),
+            "setup": users.count() == 0, "signup_open": users.signup_open()}
+
+
+@app.post("/api/signup")
+def signup(request: Request, cred: Credentials) -> JSONResponse:
+    try:
+        user = users.create(cred.username.strip(), cred.password)
+    except users.AuthError as e:
+        raise HTTPException(400, str(e)) from e
+    return _signed_in(request, user, users.new_session(user["id"]))
+
+
+@app.post("/api/login")
+def login(request: Request, cred: Credentials) -> JSONResponse:
+    try:
+        user, token = users.login(cred.username.strip(), cred.password)
+    except users.AuthError as e:
+        raise HTTPException(401, str(e)) from e
+    return _signed_in(request, user, token)
+
+
+@app.post("/api/logout")
+def logout(request: Request) -> JSONResponse:
+    users.logout(request.cookies.get(users.COOKIE))
+    res = JSONResponse({"ok": True})
+    res.delete_cookie(users.COOKIE, path="/")
+    return res
+
+
+class Password(BaseModel):
+    password: str = Field(max_length=256)
+
+
+class NewPassword(Password):
+    current: str = Field(max_length=256)
+
+
+@app.post("/api/password")
+def change_password(request: Request, body: NewPassword) -> JSONResponse:
+    """Change your own password; other devices are signed out."""
+    user = request.state.user
+    if not users.verify(user["id"], body.current):
+        raise HTTPException(400, "your current password is not right")
+    try:
+        users.set_password(user["id"], body.password)
+    except users.AuthError as e:
+        raise HTTPException(400, str(e)) from e
+    return _signed_in(request, user, users.new_session(user["id"]))
+
+
+@app.get("/api/admin/users")
+def admin_users() -> dict:
+    return {"users": users.all_users(), "signup_open": users.signup_open()}
+
+
+class SignupSetting(BaseModel):
+    signup_open: bool
+
+
+@app.post("/api/admin/signup")
+def admin_signup(body: SignupSetting) -> dict:
+    users.set_signup_open(body.signup_open)
+    return {"signup_open": users.signup_open()}
+
+
+@app.post("/api/admin/users/{user_id}/password")
+def admin_reset_password(user_id: int, body: Password) -> dict:
+    """Set a user's password; they are signed out everywhere."""
+    try:
+        users.set_password(user_id, body.password)
+    except KeyError:
+        raise HTTPException(404, "no such user") from None
+    except users.AuthError as e:
+        raise HTTPException(400, str(e)) from e
+    return {"ok": True}
+
+
+@app.delete("/api/admin/users/{user_id}")
+def admin_delete_user(request: Request, user_id: int) -> dict:
+    """Delete an account and its saved designs."""
+    if user_id == _uid(request):
+        raise HTTPException(400, "you cannot delete your own account here")
+    try:
+        users.delete(user_id)
+    except KeyError:
+        raise HTTPException(404, "no such user") from None
+    except users.AuthError as e:
+        raise HTTPException(400, str(e)) from e
+    return {"ok": True, "designs_deleted": library.delete_all(user_id)}
 
 
 MAX_PIXELS = 50_000_000  # a 48 MP phone photo fits; larger is rejected before decoding
@@ -268,8 +405,8 @@ MAX_DESIGN_BYTES = 2 * 1024 * 1024
 
 
 @app.get("/api/designs")
-def list_designs() -> list[dict]:
-    return library.designs()
+def list_designs(request: Request) -> list[dict]:
+    return library.designs(_uid(request))
 
 
 @app.post("/api/designs")
@@ -282,35 +419,35 @@ async def save_design(request: Request) -> dict:
             raise HTTPException(413, "design is too large")
     try:
         data = json.loads(body)
-        return library.save(data.get("name", ""), data["project"])
+        return library.save(_uid(request), data.get("name", ""), data["project"])
     except (ValueError, KeyError, TypeError, AttributeError) as e:
         raise HTTPException(400, f"could not save this design: {e}") from e
 
 
 @app.get("/api/designs/{design_id}")
-def get_design(design_id: str) -> dict:
+def get_design(request: Request, design_id: str) -> dict:
     try:
-        return library.load(design_id)
+        return library.load(design_id, _uid(request))
     except KeyError:
         raise HTTPException(404, "no such design") from None
 
 
 @app.delete("/api/designs/{design_id}")
-def delete_design(design_id: str) -> dict:
+def delete_design(request: Request, design_id: str) -> dict:
     try:
-        library.delete(design_id)
+        library.delete(design_id, _uid(request))
     except KeyError:
         raise HTTPException(404, "no such design") from None
     return {"ok": True}
 
 
 @app.get("/api/designs/{design_id}/{kind}.stl")
-def design_stl(design_id: str, kind: str) -> Response:
+def design_stl(request: Request, design_id: str, kind: str) -> Response:
     """Build a saved design's cutter, pusher or stamp at its saved size."""
     if kind not in ("cutter", "pusher", "stamp"):
         raise HTTPException(404, "no such part")
     try:
-        entry = library.load(design_id)
+        entry = library.load(design_id, _uid(request))
         proj = Project.from_json(entry["project"])
         poly, params = proj.polygon(), proj.params()
         notes: list[str] = []

@@ -1,16 +1,6 @@
 import json
 
 import cv2
-import pytest
-from fastapi.testclient import TestClient
-
-from cuttersnap.api import app
-
-
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-    monkeypatch.setenv("CUTTERSNAP_DATA", str(tmp_path))
-    return TestClient(app)
 
 
 def _project(star_photo, client):

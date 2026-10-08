@@ -9,10 +9,50 @@
 </head>
 <body>
 <header>
-  <h1>CutterSnap</h1>
-  <p>Photo of a cookie in, printable cookie cutter out.</p>
+  <div>
+    <h1>CutterSnap</h1>
+    <p>Photo of a cookie in, printable cookie cutter out.</p>
+  </div>
+  <details id="account" class="hidden">
+    <summary id="who"></summary>
+    <div class="menu">
+      <button id="change-pw">Change password</button>
+      <button id="open-admin" class="hidden">Users and sign-up</button>
+      <button id="sign-out">Sign out</button>
+    </div>
+  </details>
 </header>
-<main>
+<section id="gate" class="panel hidden">
+  <h2 id="gate-title">Sign in</h2>
+  <p id="gate-hint" class="hint"></p>
+  <form id="gate-form">
+    <label>Username <input id="gate-user" name="username" autocomplete="username" required minlength="3" maxlength="32"
+      pattern="[A-Za-z0-9_.\-]+" title="3 to 32 letters, digits, dots, dashes or underscores" autocapitalize="none" spellcheck="false"></label>
+    <label>Password <input id="gate-pw" name="password" type="password" autocomplete="current-password" required minlength="8" maxlength="256"></label>
+    <button class="primary" id="gate-go">Sign in</button>
+    <p id="gate-error" class="error" aria-live="polite"></p>
+  </form>
+  <p id="gate-switch"><button id="gate-mode" type="button">Create an account</button></p>
+</section>
+<dialog id="pw-dialog">
+  <form id="pw-form" method="dialog">
+    <h2>Change password</h2>
+    <label>Current password <input id="pw-current" type="password" autocomplete="current-password" required></label>
+    <label>New password <input id="pw-new" type="password" autocomplete="new-password" required minlength="8" maxlength="256"></label>
+    <p class="hint">Other devices signed in as you are signed out.</p>
+    <p id="pw-error" class="error" aria-live="polite"></p>
+    <button class="primary" value="save">Change password</button> <button value="cancel" formnovalidate>Cancel</button>
+  </form>
+</dialog>
+<dialog id="admin">
+  <h2>Users and sign-up</h2>
+  <label class="check"><input type="checkbox" id="signup-open"> Anyone who can open this CutterSnap can create an account</label>
+  <p class="hint">Turn this off once everyone has an account. Each person sees only their own designs.</p>
+  <ul id="users"></ul>
+  <p id="admin-error" class="error" aria-live="polite"></p>
+  <form method="dialog"><button>Close</button></form>
+</dialog>
+<main class="hidden">
   <section class="panel" id="photo-panel">
     <div class="steps">
       <label class="file">1. Choose a photo <input type="file" id="file" accept="image/*"></label>

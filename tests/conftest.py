@@ -1,6 +1,7 @@
 import cv2
 import numpy as np
 import pytest
+from fastapi.testclient import TestClient
 
 
 def star_points(cx, cy, r_out, r_in, n=5):
@@ -44,3 +45,22 @@ def white_on_white():
 def iou(a, b):
     a, b = a > 127, b > 127
     return (a & b).sum() / (a | b).sum()
+
+
+@pytest.fixture
+def anon(tmp_path, monkeypatch):
+    """The app with its own empty data folder, nobody signed in."""
+    from cuttersnap import users
+    from cuttersnap.api import app
+
+    monkeypatch.setenv("CUTTERSNAP_DATA", str(tmp_path))
+    monkeypatch.setattr(users, "_failures", {})
+    return TestClient(app)
+
+
+@pytest.fixture
+def client(anon):
+    """Signed in as the first account (the admin)."""
+    res = anon.post("/api/signup", json={"username": "baker", "password": "sugar-cookies"})
+    assert res.status_code == 200, res.text
+    return anon
