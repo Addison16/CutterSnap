@@ -21,6 +21,7 @@ from dataclasses import asdict, dataclass
 import manifold3d as m3d
 import numpy as np
 import trimesh
+from shapely.affinity import scale
 from shapely.geometry import MultiPolygon, Polygon
 from shapely.ops import orient, polylabel
 
@@ -111,10 +112,21 @@ def blade_profile(p: CutterParams) -> list[tuple[float, float, float]]:
     return out
 
 
+def mirrored(poly: Polygon) -> Polygon:
+    """Left-right mirror image, in place."""
+    x0, _, x1, _ = poly.bounds
+    return orient(scale(poly, -1, 1, origin=((x0 + x1) / 2, 0)), 1.0)
+
+
 def build_cutter(outline: Polygon, params: CutterParams | None = None) -> trimesh.Trimesh:
+    """Cutter mesh, printed base-down with the blade up.
+
+    In use it is turned over, blade down, so it is built as the mirror image
+    of the outline and the cookie comes out the same way round as the photo.
+    """
     p = params or CutterParams()
     p.validate()
-    inner = orient(outline, 1.0)
+    inner = mirrored(orient(outline, 1.0))
     if p.spread:
         inner = inner.buffer(-p.spread, join_style=1)
         if inner.is_empty or inner.geom_type != "Polygon":
