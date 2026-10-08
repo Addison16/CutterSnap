@@ -17,6 +17,19 @@ Then open http://localhost:8080.
 3. Pick the size and your nozzle, then **Trace outline** and **Make cutter**.
 4. Download the STL and print it base-down with no supports.
 
+If the outline still follows the icing instead of the cookie (white icing on a white
+plate, stripes near the edge, a pale rim the same colour as the table):
+
+- Press **Zoom to box**, choose **Edge points**, and click 6 to 12 points on the cookie's
+  outer edge in order around it. The outline follows the photo's edge between your
+  points and updates after every click. Drag a point to move it, click near the line
+  to add one there, and shift-click to remove one.
+- Or press **Edit as points** after an automatic trace to turn it into points you can drag.
+
+**Save project** writes a small `.json` file with the outline, your marks and the
+settings. **Open project** loads it again, and **Make cutter** then rebuilds exactly the
+same cutter, even without the photo.
+
 ## What makes the cutter good
 
 | Part | Default | Why |
@@ -42,7 +55,10 @@ of curvature after smoothing, and every cutter is checked to be one watertight p
    outer edge even for white icing on a white plate, and ignores icing details inside.
 2. **GrabCut refinement** adjusts a narrow band around that shape by colour and obeys
    your clicks.
-3. **Outline rules.** Holes are filled, the shape is scaled to your size in mm, corners
+3. **Edge points** (when you place them) replace steps 1 and 2: OpenCV's Intelligent
+   Scissors finds the cheapest edge path between neighbouring points on a
+   median-filtered copy of the photo, which wipes out thin icing lines first.
+4. **Outline rules.** Holes are filled, the shape is scaled to your size in mm, corners
    are rounded to the minimum radii, and a closed smoothing spline is fitted.
 
 ## Command line
@@ -50,6 +66,8 @@ of curvature after smoothing, and every cutter is checked to be one watertight p
 ```sh
 pip install .
 cuttersnap photo.jpg cutter.stl --box 520,1060,350,380 --cookie 690,1250 --size 90 --preview check.jpg
+cuttersnap photo.jpg cutter.stl --edge 876,602 --edge 920,582 --edge 1031,655 ... --save-project heart.json
+cuttersnap heart.json cutter.stl   # rebuild from a saved project, byte for byte
 ```
 
 ## Development

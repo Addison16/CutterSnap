@@ -5,7 +5,10 @@ import { OrbitControls } from '/static/vendor/OrbitControls.js';
 const $ = (id) => document.getElementById(id);
 const canvas = $('photo');
 const ctx = canvas.getContext('2d');
-const state = { file: null, img: null, scale: 1, tool: 'box', rect: null, fg: [], bg: [], drag: null, outline: null };
+const state = {
+  file: null, img: null, hash: '', scale: 1, view: [0, 0, 1, 1], zoomed: false, tool: 'box', rect: null, fg: [], bg: [], edge: [],
+  drag: null, moving: -1, outline: null, outlineMm: null, traceSeq: 0,
+};
 
 function setStatus(msg) { $('status').textContent = msg; }
 
@@ -16,58 +19,108 @@ function loadFile(file) {
   const img = new Image();
   img.onload = () => {
     state.img = img;
-    state.rect = null; state.fg = []; state.bg = []; resetCutter();
-    const maxW = canvas.parentElement.clientWidth;
-    state.scale = Math.min(1, maxW / img.width, 900 / img.height);
-    canvas.width = Math.round(img.width * state.scale);
-    canvas.height = Math.round(img.height * state.scale);
+    if (!state.keepMarks) { state.rect = null; state.fg = []; state.bg = []; state.edge = []; resetCutter(); }
+    state.keepMarks = false;
+    state.zoomed = false;
+    fitView([0, 0, img.width, img.height]);
     $('hint').classList.add('hidden');
     $('trace').disabled = false;
+    $('zoom').disabled = false; $('zoom').textContent = 'Zoom to box';
     draw();
-    setStatus('Draw a box around the cookie, then Trace outline. Single-cookie photos can skip the box.');
+    if (!state.outline) setStatus('Draw a box around the cookie, then Trace outline. Single-cookie photos can skip the box.');
   };
   img.src = URL.createObjectURL(file);
+  state.hash = '';
+  hashFile(file).then((h) => { if (state.file === file) state.hash = h; });
+}
+
+async function hashFile(file) {
+  // crypto.subtle only exists on https or localhost; the hash is a convenience
+  if (!globalThis.crypto?.subtle) return '';
+  const buf = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+// show the part of the photo given as [x, y, w, h] in photo pixels
+function fitView(v) {
+  const maxW = canvas.parentElement.clientWidth;
+  state.view = v;
+  state.scale = Math.min(state.zoomed ? 4 : 1, maxW / v[2], 900 / v[3]);
+  canvas.width = Math.round(v[2] * state.scale);
+  canvas.height = Math.round(v[3] * state.scale);
 }
 
 function draw() {
   if (!state.img) return;
-  const s = state.scale;
-  ctx.drawImage(state.img, 0, 0, canvas.width, canvas.height);
+  const s = state.scale, [vx, vy, vw, vh] = state.view;
+  const X = (x) => (x - vx) * s, Y = (y) => (y - vy) * s;
+  ctx.drawImage(state.img, vx, vy, vw, vh, 0, 0, canvas.width, canvas.height);
   const r = state.drag || state.rect;
   if (r) {
     ctx.strokeStyle = '#2a8ef0'; ctx.lineWidth = 2;
-    ctx.strokeRect(r[0] * s, r[1] * s, r[2] * s, r[3] * s);
+    ctx.strokeRect(X(r[0]), Y(r[1]), r[2] * s, r[3] * s);
   }
   if (state.outline) {
     ctx.strokeStyle = '#e020e0'; ctx.lineWidth = 2.5; ctx.beginPath();
-    state.outline.forEach(([x, y], i) => (i ? ctx.lineTo(x * s, y * s) : ctx.moveTo(x * s, y * s)));
+    state.outline.forEach(([x, y], i) => (i ? ctx.lineTo(X(x), Y(y)) : ctx.moveTo(X(x), Y(y))));
     ctx.closePath(); ctx.stroke();
   }
   for (const [pts, color] of [[state.fg, '#1fb84a'], [state.bg, '#e0302a']]) {
     ctx.fillStyle = color;
-    for (const [x, y] of pts) { ctx.beginPath(); ctx.arc(x * s, y * s, 6, 0, 7); ctx.fill(); }
+    for (const [x, y] of pts) { ctx.beginPath(); ctx.arc(X(x), Y(y), 6, 0, 7); ctx.fill(); }
   }
+  ctx.fillStyle = '#ffd23f'; ctx.strokeStyle = '#3a2a00'; ctx.lineWidth = 1.5;
+  for (const [x, y] of state.edge) { ctx.beginPath(); ctx.arc(X(x), Y(y), 5, 0, 7); ctx.fill(); ctx.stroke(); }
 }
 
 function toImage(ev) {
   const b = canvas.getBoundingClientRect();
   const k = canvas.width / b.width / state.scale;
-  return [Math.round((ev.clientX - b.left) * k), Math.round((ev.clientY - b.top) * k)];
+  return [Math.round((ev.clientX - b.left) * k + state.view[0]), Math.round((ev.clientY - b.top) * k + state.view[1])];
+}
+
+// index of the edge point under the pointer, or -1
+function edgeAt(p) {
+  const r = 10 / state.scale;
+  return state.edge.findIndex(([x, y]) => Math.hypot(x - p[0], y - p[1]) <= r);
+}
+
+// A new edge point is appended, as when clicking round the cookie in order,
+// unless it sits close to the line between two existing points: then it
+// goes between them, to fix the outline there.
+function insertEdge(p) {
+  const e = state.edge;
+  const d = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+  let best = e.length, ratio = 0.3;
+  for (let i = 0; i + 1 < e.length; i++) {
+    const r = (d(e[i], p) + d(p, e[i + 1]) - d(e[i], e[i + 1])) / Math.max(1, d(e[i], e[i + 1]));
+    if (r < ratio) { ratio = r; best = i + 1; }
+  }
+  e.splice(best, 0, p);
 }
 
 canvas.addEventListener('pointerdown', (ev) => {
   if (!state.img) return;
   const p = toImage(ev);
   if (state.tool === 'box') { state.drag = [p[0], p[1], 0, 0]; state.start = p; canvas.setPointerCapture(ev.pointerId); }
+  else if (state.tool === 'edge') {
+    const i = edgeAt(p);
+    if (ev.shiftKey || ev.button === 2) { if (i >= 0) { state.edge.splice(i, 1); edgeChanged(); } return; }
+    if (i >= 0) state.moving = i; else { insertEdge(p); state.moving = state.edge.indexOf(p); }
+    canvas.setPointerCapture(ev.pointerId); draw();
+  }
   else { (state.tool === 'fg' ? state.fg : state.bg).push(p); draw(); }
 });
+canvas.addEventListener('contextmenu', (ev) => { if (state.tool === 'edge') ev.preventDefault(); });
 canvas.addEventListener('pointermove', (ev) => {
+  if (state.moving >= 0) { state.edge[state.moving] = toImage(ev); draw(); return; }
   if (!state.drag) return;
   const [x, y] = toImage(ev), [sx, sy] = state.start;
   state.drag = [Math.min(x, sx), Math.min(y, sy), Math.abs(x - sx), Math.abs(y - sy)];
   draw();
 });
 canvas.addEventListener('pointerup', () => {
+  if (state.moving >= 0) { state.moving = -1; edgeChanged(); return; }
   if (!state.drag) return;
   if (state.drag[2] > 8 && state.drag[3] > 8) state.rect = state.drag;
   state.drag = null; draw();
@@ -76,13 +129,56 @@ canvas.addEventListener('pointerup', () => {
 document.querySelectorAll('[data-tool]').forEach((b) => b.addEventListener('click', () => {
   document.querySelectorAll('[data-tool]').forEach((o) => o.classList.toggle('active', o === b));
   state.tool = b.dataset.tool;
+  if (state.tool === 'edge' && state.img && state.edge.length < 3)
+    setStatus('Click 3 or more points on the cookie\'s outer edge, in order around it. The outline follows the edge between them.');
 }));
+// zoom in on the box (or the outline) so edge points can be placed precisely
+$('zoom').addEventListener('click', () => {
+  const img = state.img;
+  let r = state.rect;
+  if (!state.zoomed && !r && state.outline) {
+    const xs = state.outline.map((p) => p[0]), ys = state.outline.map((p) => p[1]);
+    r = [Math.min(...xs), Math.min(...ys), Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)];
+  }
+  if (!state.zoomed && !r) { setStatus('Draw a box around the cookie first, then zoom.'); return; }
+  state.zoomed = !state.zoomed;
+  if (state.zoomed) {
+    const pad = 0.12 * Math.max(r[2], r[3]);
+    const x0 = Math.max(0, r[0] - pad), y0 = Math.max(0, r[1] - pad);
+    const x1 = Math.min(img.width, r[0] + r[2] + pad), y1 = Math.min(img.height, r[1] + r[3] + pad);
+    fitView([x0, y0, x1 - x0, y1 - y0]);
+  } else fitView([0, 0, img.width, img.height]);
+  $('zoom').textContent = state.zoomed ? 'Whole photo' : 'Zoom to box';
+  draw();
+});
+function selectTool(name) { document.querySelector(`[data-tool="${name}"]`).click(); }
 function resetCutter() {
   state.outline = null; state.outlineMm = null;
-  $('make').disabled = true;
+  for (const id of ['make', 'edit', 'save']) $(id).disabled = true;
   $('download').classList.add('hidden');
 }
-$('clear').addEventListener('click', () => { state.rect = null; state.fg = []; state.bg = []; resetCutter(); draw(); });
+$('clear').addEventListener('click', () => {
+  state.rect = null; state.fg = []; state.bg = []; state.edge = []; resetCutter(); draw();
+});
+
+// with edge points the outline is re-traced after every change
+let edgeTimer;
+function edgeChanged() {
+  draw();
+  clearTimeout(edgeTimer);
+  if (state.edge.length >= 3) edgeTimer = setTimeout(trace, 150);
+  else { resetCutter(); draw(); }
+}
+
+$('edit').addEventListener('click', () => {
+  // about one point every 8% of the way round, at least 8
+  const o = state.outline;
+  const n = Math.max(8, Math.min(24, Math.round(o.length / 40)));
+  state.edge = Array.from({ length: n }, (_, i) => o[Math.floor((i * o.length) / n)].map(Math.round));
+  selectTool('edge');
+  draw();
+  setStatus('Drag the yellow points onto the cookie\'s real edge. Click to add a point, shift-click to remove one.');
+});
 $('file').addEventListener('change', (e) => loadFile(e.target.files[0]));
 document.addEventListener('dragover', (e) => e.preventDefault());
 document.addEventListener('drop', (e) => { e.preventDefault(); loadFile(e.dataTransfer.files[0]); });
@@ -92,28 +188,40 @@ async function apiError(res) {
   try { return (await res.json()).detail; } catch { return res.statusText; }
 }
 
-$('trace').addEventListener('click', async () => {
+async function trace() {
+  const seq = ++state.traceSeq;
   const form = new FormData();
   form.append('image', state.file);
-  if (state.rect) form.append('rect', JSON.stringify(state.rect));
-  form.append('fg', JSON.stringify(state.fg));
-  form.append('bg', JSON.stringify(state.bg));
+  if (state.edge.length >= 3) form.append('edge', JSON.stringify(state.edge));
+  else {
+    if (state.rect) form.append('rect', JSON.stringify(state.rect));
+    form.append('fg', JSON.stringify(state.fg));
+    form.append('bg', JSON.stringify(state.bg));
+  }
   form.append('size_mm', $('size').value);
-  setStatus('Tracing…'); $('trace').disabled = true;
-  resetCutter(); draw();
+  setStatus('Tracing…');
   try {
     const res = await fetch('/api/trace', { method: 'POST', body: form });
     if (!res.ok) throw new Error(await apiError(res));
     const data = await res.json();
+    if (seq !== state.traceSeq) return; // a newer trace has started
+    resetCutter();
     state.outline = data.outline_px; state.outlineMm = data.outline_mm;
     draw();
-    $('make').disabled = false;
-    setStatus(`Outline is ${data.width_mm} × ${data.height_mm} mm. Wrong edge? Add cookie / not cookie clicks and trace again.`);
-  } catch (e) { setStatus(`Could not trace: ${e.message}`); }
+    for (const id of ['make', 'edit', 'save']) $(id).disabled = false;
+    setStatus(`Outline is ${data.width_mm} × ${data.height_mm} mm. ` + (state.edge.length >= 3
+      ? 'Drag or add yellow points where it misses the edge.'
+      : 'Wrong edge? Add cookie / not cookie clicks and trace again, or use Edit as points.'));
+  } catch (e) { if (seq === state.traceSeq) { resetCutter(); draw(); setStatus(`Could not trace: ${e.message}`); } }
+}
+$('trace').addEventListener('click', async () => {
+  $('trace').disabled = true;
+  await trace();
   $('trace').disabled = false;
 });
 
 $('make').addEventListener('click', async () => {
+  if (!state.outlineMm) return;
   setStatus('Building cutter…'); $('make').disabled = true;
   try {
     const res = await fetch('/api/cutter', {
@@ -134,6 +242,49 @@ $('make').addEventListener('click', async () => {
     setStatus('Cutter ready. Print it base-down with no supports.' + (warn ? ` Note: ${warn}` : ''));
   } catch (e) { setStatus(`Could not build cutter: ${e.message}`); }
   $('make').disabled = false;
+});
+
+// ---- project files -----------------------------------------------------------
+const SETTINGS = { nozzle_mm: 'nozzle', height: 'height', flange_w: 'flange', spread: 'spread' };
+
+$('save').addEventListener('click', () => {
+  const project = {
+    cuttersnap: 1,
+    photo: { name: state.file?.name || '', sha256: state.hash },
+    marks: { box: state.rect, cookie: state.fg, not_cookie: state.bg, edge: state.edge },
+    size_mm: +$('size').value,
+    cutter: Object.fromEntries(Object.entries(SETTINGS).map(([k, id]) => [k, +$(id).value])),
+    outline_mm: state.outlineMm,
+    outline_px: state.outline,
+  };
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(project)], { type: 'application/json' }));
+  a.download = (state.file?.name || 'cookie').replace(/\.[^.]*$/, '') + '.cuttersnap.json';
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+});
+
+$('open').addEventListener('change', async (e) => {
+  const f = e.target.files[0];
+  e.target.value = '';
+  if (!f) return;
+  let p;
+  try { p = JSON.parse(await f.text()); } catch { setStatus('That file is not a CutterSnap project.'); return; }
+  if (p.cuttersnap !== 1 || !Array.isArray(p.outline_mm)) { setStatus('That file is not a CutterSnap project.'); return; }
+  const m = p.marks || {};
+  resetCutter();
+  state.rect = m.box || null; state.fg = m.cookie || []; state.bg = m.not_cookie || []; state.edge = m.edge || [];
+  $('size').value = p.size_mm ?? 90;
+  for (const [k, id] of Object.entries(SETTINGS)) if (p.cutter?.[k] != null) $(id).value = p.cutter[k];
+  state.outlineMm = p.outline_mm; state.outline = p.outline_px || null;
+  $('make').disabled = $('save').disabled = false;
+  $('edit').disabled = !state.outline;
+  draw();
+  const same = state.hash && p.photo?.sha256 === state.hash;
+  setStatus(`Opened ${f.name}. ` + (state.img
+    ? (same || !p.photo?.sha256 ? 'Make cutter rebuilds it exactly.' : `Note: it was made from a different photo (${p.photo.name}).`)
+    : `Make cutter rebuilds it exactly. To edit the outline, also choose the photo ${p.photo?.name || ''}.`));
+  if (!state.img) state.keepMarks = true;
 });
 
 // ---- 3D preview -------------------------------------------------------------
