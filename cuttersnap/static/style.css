@@ -4,7 +4,7 @@
 }
 * { box-sizing: border-box; }
 body { margin: 0; font: 16px/1.5 system-ui, sans-serif; background: var(--bg); color: var(--ink); }
-header { padding: 16px 24px; border-bottom: 1px solid var(--line); }
+header { padding: 16px 24px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 header h1 { margin: 0; font-size: 1.5rem; }
 header p { margin: 0; color: var(--muted); }
 main { display: grid; grid-template-columns: minmax(0, 3fr) minmax(280px, 2fr); gap: 16px; padding: 16px; }
@@ -50,6 +50,27 @@ canvas { max-width: 100%; display: block; touch-action: none; border-radius: 6px
 #designs .meta span { color: var(--muted); font-size: .85rem; }
 #designs .acts { display: flex; flex-wrap: wrap; gap: 6px; }
 #designs .acts .primary { margin: 0; }
+
+/* accounts */
+.error { color: #c0392b; min-height: 1.2em; margin: 6px 0 0; }
+#gate { max-width: 380px; margin: 32px auto; }
+#gate .hint, dialog .hint { color: var(--muted); }
+#gate label, dialog label { display: flex; flex-direction: column; gap: 4px; margin: 10px 0; }
+#gate input, dialog input:not([type=checkbox]) { font: inherit; padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--ink); }
+#gate-switch button { border: none; background: none; color: var(--accent); padding: 0; text-decoration: underline; }
+#account { position: relative; }
+#account summary { cursor: pointer; list-style: none; padding: 6px 12px; border: 1px solid var(--line); border-radius: 6px; }
+#account summary::-webkit-details-marker { display: none; }
+#account .menu { position: absolute; right: 0; top: calc(100% + 4px); z-index: 5; display: flex; flex-direction: column; gap: 6px;
+  background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 8px; min-width: 200px; }
+dialog { background: var(--panel); color: var(--ink); border: 1px solid var(--line); border-radius: 10px; width: min(480px, calc(100vw - 32px)); }
+dialog::backdrop { background: rgb(0 0 0 / .4); }
+dialog h2 { margin-top: 0; }
+dialog label.check { flex-direction: row; align-items: flex-start; }
+#users { list-style: none; padding: 0; margin: 0 0 8px; }
+#users li { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--line); }
+#users li strong { flex: 1; min-width: 120px; }
+#users li em { color: var(--muted); font-style: normal; font-size: .85rem; }
 
 /* phones: one column, bigger touch targets, nothing wider than the screen */
 @media (max-width: 600px) {

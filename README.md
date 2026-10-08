@@ -42,12 +42,33 @@ Then open http://localhost:8080.
   container (`docker compose pull && docker compose up -d` with Compose). Your designs stay.
 - **Build it yourself** from a clone instead: `docker compose up -d --build`.
 
+**Accounts.** The first time you open CutterSnap it asks you to create the admin account.
+Designs saved before accounts existed become that account's. After that, anyone who can open
+the page can create their own account, and each person sees only their own designs. Once
+everyone has one, open your name in the top corner, choose **Users and sign-up** and turn
+sign-up off. That menu also sets a new password for anyone who forgets theirs, or deletes an
+account with its designs. Accounts live in `/data/cuttersnap.db` in the same volume, with
+passwords stored as salted scrypt hashes; nothing is sent anywhere.
+
+Forgot the admin password? Set a new one from the computer running CutterSnap:
+
+```sh
+docker exec -it cuttersnap python -m cuttersnap.users reset-password YOUR_NAME
+```
+
+With Compose, run `docker compose exec cuttersnap python -m cuttersnap.users reset-password YOUR_NAME`
+from the folder with `docker-compose.yml`.
+
 **On your phone.** Open the same address from any phone on your home Wi-Fi, using the
-computer's local address (for example http://192.168.1.20:8080), take the photo there, and
-**Save to my designs**. The design then waits under **My designs** on every device that opens
-this CutterSnap, ready to download on the computer next to your printer. There are no
-accounts: anyone who can open the page can see and delete the saved designs, so keep
-CutterSnap on your home network and don't expose port 8080 to the internet.
+computer's local address (for example http://192.168.1.20:8080), sign in, take the photo there,
+and **Save to my designs**. The design then waits under **My designs** wherever you sign in,
+ready to download on the computer next to your printer.
+
+**Reaching it from outside your home.** Put CutterSnap behind a reverse proxy with HTTPS
+(Caddy, Traefik, nginx or a Cloudflare tunnel) rather than opening port 8080 directly, so
+passwords never cross the internet unencrypted. The sign-in cookie is marked secure when the
+proxy sends `X-Forwarded-Proto: https`, and a proxy that rewrites the `Host` header must pass
+the original as `X-Forwarded-Host`. Turn sign-up off before you open it up.
 
 ## Use it
 
@@ -148,7 +169,8 @@ machine.
 - **Project files** that rebuild the same STL, byte for byte, and **My designs**, so a cutter
   made on your phone is waiting on the computer by your printer.
 - **A smoothness check** on the STL itself, not just the outline.
-- **Free, self-hosted, no accounts, no AI, nothing uploaded anywhere.**
+- **Free and self-hosted, no AI, nothing uploaded anywhere.** Accounts are kept on your own
+  CutterSnap, so a family or a club can share one with each person's designs kept apart.
 
 Printed cutters are not food-safe in any certified sense: layer lines hold on to dough.
 Wash by hand in warm (not hot) water, dry right away, and replace them when the edge gets
@@ -201,8 +223,7 @@ CI then tests the code, publishes `ghcr.io/addison16/cuttersnap` as `0.1.0`, `0.
 ## Status
 
 Early but complete: tracing, edge points, smooth outlines, a slice-tested blade, pusher plate,
-matching stamp, initials, project files and saved designs. Possible next steps: red-circle
-detection on phone screenshots, and an optional sign-in for instances shared beyond a home
-network.
+matching stamp, initials, project files, saved designs and accounts. A possible next step is
+red-circle detection on phone screenshots.
 
 Licensed MIT. Bundles [three.js](https://threejs.org) (MIT) for the 3D preview.

@@ -1,19 +1,14 @@
 import json
 
 import cv2
-from fastapi.testclient import TestClient
-
-from cuttersnap.api import app
-
-client = TestClient(app)
 
 
-def test_health_and_page():
+def test_health_and_page(client):
     assert client.get("/api/health").json()["ok"]
     assert "CutterSnap" in client.get("/").text
 
 
-def test_trace_then_cutter(star_photo):
+def test_trace_then_cutter(client, star_photo):
     img, _ = star_photo
     ok, png = cv2.imencode(".png", img)
     res = client.post("/api/trace", files={"image": ("star.png", png.tobytes(), "image/png")},
@@ -28,7 +23,7 @@ def test_trace_then_cutter(star_photo):
     assert len(res.content) > 10_000
 
 
-def test_bad_image_rejected():
+def test_bad_image_rejected(client):
     res = client.post("/api/trace", files={"image": ("x.png", b"not an image", "image/png")})
     assert res.status_code == 400
 
@@ -37,7 +32,7 @@ def _png(img):
     return cv2.imencode(".png", img)[1].tobytes()
 
 
-def test_box_outside_photo_and_bad_box_rejected(star_photo):
+def test_box_outside_photo_and_bad_box_rejected(client, star_photo):
     img, _ = star_photo
     for rect in ("[5000, 5000, 100, 100]", "not json", "[1, 2]", "{}"):
         res = client.post("/api/trace", files={"image": ("s.png", _png(img), "image/png")},
@@ -45,15 +40,15 @@ def test_box_outside_photo_and_bad_box_rejected(star_photo):
         assert res.status_code == 400, (rect, res.text)
 
 
-def test_cookie_click_outside_box_still_traces(star_photo):
+def test_cookie_click_outside_box_still_traces(client, star_photo):
     img, _ = star_photo
     res = client.post("/api/trace", files={"image": ("s.png", _png(img), "image/png")},
                       data={"rect": json.dumps([130, 50, 540, 520]), "fg": "[[790, 590], [400, 310]]"})
     assert res.status_code == 200, res.text
 
 
-def test_oversized_upload_refused(monkeypatch, star_photo):
-    import cuttersnap.api as api
+def test_oversized_upload_refused(client, monkeypatch, star_photo):
+    from cuttersnap import api
 
     monkeypatch.setattr(api, "MAX_UPLOAD", 1000)
     img, _ = star_photo
@@ -61,8 +56,8 @@ def test_oversized_upload_refused(monkeypatch, star_photo):
     assert res.status_code == 413
 
 
-def test_huge_dimensions_refused(monkeypatch, star_photo):
-    import cuttersnap.api as api
+def test_huge_dimensions_refused(client, monkeypatch, star_photo):
+    from cuttersnap import api
 
     monkeypatch.setattr(api, "MAX_PIXELS", 1000)
     img, _ = star_photo
@@ -70,7 +65,7 @@ def test_huge_dimensions_refused(monkeypatch, star_photo):
     assert res.status_code == 413
 
 
-def test_trace_with_edge_points(star_photo):
+def test_trace_with_edge_points(client, star_photo):
     from conftest import star_points
 
     img, _ = star_photo
@@ -83,7 +78,7 @@ def test_trace_with_edge_points(star_photo):
     assert res.status_code == 400
 
 
-def test_check_measures_the_cutting_face_after_spread():
+def test_check_measures_the_cutting_face_after_spread(client):
     from shapely.geometry import box
 
     sq = list(box(0, 0, 40, 40).buffer(2, join_style=1).exterior.coords)[:-1]

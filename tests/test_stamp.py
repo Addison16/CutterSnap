@@ -4,10 +4,8 @@ import cv2
 import numpy as np
 import pytest
 import trimesh
-from fastapi.testclient import TestClient
 from shapely.geometry import Point, Polygon
 
-from cuttersnap.api import app
 from cuttersnap.cutter import CutterParams, build_cutter
 from cuttersnap.outline import mask_to_outline
 from cuttersnap.stamp import build_stamp, detail_lines, from_rings, rings
@@ -59,9 +57,8 @@ def test_cutter_is_mirrored_for_blade_down_use():
     assert top[np.argmax(top[:, 1]), 0] > top[:, 0].mean()
 
 
-def test_stamp_endpoints():
+def test_stamp_endpoints(client):
     img, cookie = _photo_with_mark()
-    client = TestClient(app)
     png = cv2.imencode(".png", img)[1].tobytes()
     tr = client.post("/api/trace", files={"image": ("c.png", png, "image/png")}, data={"size_mm": "80"}).json()
     res = client.post("/api/stamp-lines", files={"image": ("c.png", png, "image/png")},
