@@ -15,7 +15,7 @@ import cv2
 from shapely.geometry import Polygon
 from shapely.ops import orient
 
-from .cutter import CutterParams, build_cutter
+from .cutter import CutterParams, build_cutter, build_pusher
 from .livewire import edge_mask
 from .outline import check_outline, mask_to_outline
 from .project import Project, sha256_file
@@ -43,6 +43,7 @@ def main(argv: list[str] | None = None) -> None:
                     help="shrink the cutter by this many mm to undo dough spreading (default 0)")
     ap.add_argument("--preview", help="also write a JPEG of the photo with the traced outline")
     ap.add_argument("--save-project", help="also write a .json project file")
+    ap.add_argument("--pusher", help="also write a pusher plate .stl (2 mm smaller, with a knob)")
     a = ap.parse_args(argv)
 
     if a.photo.lower().endswith(".json"):
@@ -76,6 +77,11 @@ def main(argv: list[str] | None = None) -> None:
     mesh.export(a.out)
     if a.save_project:
         proj.save(a.save_project)
+    if a.pusher:
+        plate, notes = build_pusher(poly, params)
+        plate.export(a.pusher)
+        for n in notes:
+            print(n)
     w, h, _ = mesh.extents
     c = check_outline(poly)
     print(f"{a.out}: {w:.1f} x {h:.1f} mm, watertight={mesh.is_watertight}, "

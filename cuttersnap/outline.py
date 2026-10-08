@@ -73,9 +73,13 @@ def mask_to_outline(
     # the smoothing spline can re-sharpen a corner slightly: measure after
     # smoothing and re-apply the rules until every point passes
     for _ in range(3):
-        if check_outline(smooth, min_convex_r, min_concave_r)["ok"]:
+        if check_outline(smooth, min_convex_r, min_concave_r, tolerance=1.0)["ok"]:
             break
         smooth = _rules(smooth, min_convex_r, min_concave_r, spacing_mm)
+    else:
+        # the spline keeps re-tightening some corner: finish with exact
+        # buffer arcs, resampled without a spline, which cannot overshoot
+        smooth = _exact(smooth, min_convex_r, min_concave_r, spacing_mm)
     bx0, by0, bx1, by1 = smooth.bounds
     k = size_mm / max(bx1 - bx0, by1 - by0)
     pts = (np.array(smooth.exterior.coords) - [bx0, by0]) * k
@@ -109,6 +113,18 @@ def _rules(poly: Polygon, min_convex_r: float, min_concave_r: float, spacing_mm:
     n = max(64, int(poly.length / spacing_mm))
     x, y = splev(np.linspace(0, 1, n, endpoint=False), tck)
     return orient(_largest(Polygon(np.c_[x, y]).buffer(0)), 1.0)
+
+
+def _exact(poly: Polygon, min_convex_r: float, min_concave_r: float, spacing_mm: float) -> Polygon:
+    """Opening and closing with true arcs, then even resampling along the edge."""
+    m = 1.05  # covers the final rescale to size, which is within a few percent
+    q = {"join_style": 1, "quad_segs": 32}
+    poly = _largest(poly.buffer(-min_convex_r * m, **q).buffer(min_convex_r * m, **q))
+    poly = _largest(poly.buffer(min_concave_r * m, **q).buffer(-min_concave_r * m, **q))
+    ring = orient(poly, 1.0).exterior
+    n = max(64, int(ring.length / spacing_mm))
+    pts = [ring.interpolate(d) for d in np.linspace(0, ring.length, n, endpoint=False)]
+    return orient(Polygon([(p.x, p.y) for p in pts]), 1.0)
 
 
 def check_outline(poly: Polygon, min_convex_r: float = 1.5, min_concave_r: float = 2.5,

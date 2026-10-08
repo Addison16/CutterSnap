@@ -31,7 +31,10 @@
   </section>
   <section class="panel" id="settings">
     <h2>3. Size and print settings</h2>
-    <label>Longest side (mm) <input type="number" id="size" value="90" min="20" max="300"></label>
+    <label title="The cookie's longest side, measured on the inside of the cutter (the edge that cuts)">Cookie size, longest side (mm) <input type="number" id="size" value="90" min="20" max="300"></label>
+    <div class="presets" aria-label="Common sizes">
+      <button data-size="50">Mini 5 cm</button><button data-size="75">Standard 7.5 cm</button><button data-size="100">Large 10 cm</button>
+    </div>
     <label>Nozzle (mm)
       <select id="nozzle"><option>0.25</option><option selected>0.4</option><option>0.6</option><option>0.8</option></select>
     </label>
@@ -42,9 +45,22 @@
     <button id="edit" disabled title="Turn the traced outline into edge points you can drag">Edit as points</button>
     <button id="make" class="primary" disabled>Make cutter</button>
     <button id="save" disabled title="Save the outline, marks and settings to rebuild this cutter later">Save project</button>
-    <a id="download" class="primary hidden" download="cookie-cutter.stl">Download STL</a>
+    <a id="download" class="primary hidden" download="cookie-cutter.stl">Download cutter</a>
+    <a id="download-pusher" class="primary hidden" download="cookie-pusher.stl"
+       title="A plate 2 mm smaller than the cookie with a knob: press it down through the cutter to push out dough that sticks">Download pusher</a>
     <p id="status" aria-live="polite"></p>
+    <ul id="report" class="hidden"></ul>
     <div id="preview"></div>
+    <details id="care">
+      <summary>Printing and care tips</summary>
+      <ul>
+        <li>Print base-down with no supports and no brim. The cutting edge is two nozzle widths, so your slicer lays it down as two full lines.</li>
+        <li>Put the seam on the outside or "random", not on a sharp point of the blade.</li>
+        <li>PETG lasts longer than PLA. PLA softens around 50 °C, so wash cutters by hand in warm, not hot, water and keep them out of the dishwasher and hot cars.</li>
+        <li>Layer lines hold on to dough and germs. Wash and dry right after use and treat printed cutters as seasonal; replace them when the edge gets rough.</li>
+        <li>Dusting the blade with flour helps dough release. The pusher plate pushes dough out of narrow parts without tearing it.</li>
+      </ul>
+    </details>
   </section>
 </main>
 <script type="module" src="/static/app.js"></script>

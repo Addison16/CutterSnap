@@ -15,7 +15,7 @@ from shapely.geometry import Polygon
 from shapely.ops import orient
 
 from . import __version__
-from .cutter import CutterParams, build_cutter
+from .cutter import CutterParams, PusherParams, build_cutter, build_pusher
 from .livewire import edge_mask
 from .outline import OutlineError, check_outline, mask_to_outline
 from .segment import segment
@@ -139,11 +139,10 @@ class CutterRequest(BaseModel):
     flange_w: float = Field(6.0, ge=2, le=20)
     tip_mm: float | None = Field(None, ge=0.3, le=2.0)
     spread: float = Field(0.0, ge=0, le=5)
+    clearance: float = Field(2.0, ge=0.5, le=5)  # pusher plate gap, all round
 
 
-@app.post("/api/cutter")
-def cutter(req: CutterRequest) -> Response:
-    """Build the cutter STL from an outline (as returned by /api/trace)."""
+def _request_geometry(req: CutterRequest) -> tuple[Polygon, CutterParams]:
     poly = Polygon(req.outline_mm).buffer(0)
     if poly.geom_type != "Polygon" or poly.area < 100:
         raise HTTPException(400, "outline must be one closed shape of at least 1 cm²")
@@ -151,13 +150,39 @@ def cutter(req: CutterRequest) -> Response:
         extra = {"wall_tip": req.tip_mm} if req.tip_mm else {}
         params = CutterParams.for_nozzle(req.nozzle_mm, height=req.height, flange_h=req.flange_h,
                                          flange_w=req.flange_w, spread=req.spread, **extra)
-        mesh = build_cutter(orient(poly, 1.0), params)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
+    return orient(poly, 1.0), params
+
+
+def _stl(mesh, filename: str, notes: list[str]) -> Response:
     if not mesh.is_watertight:
         raise HTTPException(500, "generated mesh was not watertight; please report this photo")
-    headers = {"Content-Disposition": 'attachment; filename="cookie-cutter.stl"'}
-    warnings = params.warnings(req.nozzle_mm)
-    if warnings:
-        headers["X-CutterSnap-Warning"] = " ".join(warnings)
+    headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
+    w, h, _ = mesh.extents
+    headers["X-CutterSnap-Size"] = f"{w:.1f}x{h:.1f}"
+    if notes:
+        headers["X-CutterSnap-Warning"] = " ".join(notes)
     return Response(mesh.export(file_type="stl"), media_type="model/stl", headers=headers)
+
+
+@app.post("/api/cutter")
+def cutter(req: CutterRequest) -> Response:
+    """Build the cutter STL from an outline (as returned by /api/trace)."""
+    poly, params = _request_geometry(req)
+    try:
+        mesh = build_cutter(poly, params)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    return _stl(mesh, "cookie-cutter.stl", params.warnings(req.nozzle_mm))
+
+
+@app.post("/api/pusher")
+def pusher(req: CutterRequest) -> Response:
+    """Build the matching pusher plate STL: pushes dough out of fine shapes."""
+    poly, params = _request_geometry(req)
+    try:
+        mesh, notes = build_pusher(poly, params, PusherParams(clearance=req.clearance))
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    return _stl(mesh, "cookie-pusher.stl", notes)

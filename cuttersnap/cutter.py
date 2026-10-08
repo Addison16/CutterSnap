@@ -22,7 +22,7 @@ import manifold3d as m3d
 import numpy as np
 import trimesh
 from shapely.geometry import MultiPolygon, Polygon
-from shapely.ops import orient
+from shapely.ops import orient, polylabel
 
 CHAMFER_SLICES = 6
 TAPER_SLICES = 16
@@ -123,3 +123,47 @@ def build_cutter(outline: Polygon, params: CutterParams | None = None) -> trimes
     parts += [_slab(inner, off, z0, z1) for z0, z1, off in blade_profile(p)]
     solid = m3d.Manifold.batch_boolean(parts, m3d.OpType.Add).to_mesh()
     return trimesh.Trimesh(solid.vert_properties[:, :3], solid.tri_verts)
+
+
+@dataclass
+class PusherParams:
+    """A plate that pushes dough out of the cutter, with a knob to hold."""
+
+    clearance: float = 2.0   # gap between plate and blade, all round
+    plate_h: float = 3.0     # plate thickness
+    knob_d: float = 14.0     # largest knob diameter; smaller shapes get a thinner knob
+    knob_above: float = 5.0  # knob sticks out this far when the plate is at the blade tip
+
+
+def build_pusher(outline: Polygon, params: CutterParams | None = None,
+                 pusher: PusherParams | None = None) -> tuple[trimesh.Trimesh, list[str]]:
+    """Pusher plate for the cutter `build_cutter(outline, params)` makes.
+
+    Returns the mesh and any notes for the user (for example, when the shape
+    is so narrow that only its largest part gets a plate).
+    """
+    p = params or CutterParams()
+    q = pusher or PusherParams()
+    notes = []
+    inner = orient(outline, 1.0)
+    if p.spread:
+        inner = inner.buffer(-p.spread, join_style=1)
+    # shrink, then drop slivers narrower than 2 mm that would snap off
+    plate = inner.buffer(-q.clearance, join_style=1).buffer(-1.0).buffer(1.0, join_style=1)
+    if plate.is_empty:
+        raise ValueError("this cookie is too narrow for a pusher plate")
+    if isinstance(plate, MultiPolygon):
+        plate = max(plate.geoms, key=lambda g: g.area)
+        notes.append("The pusher covers only the largest part of the shape; narrow parts are left out.")
+    centre = polylabel(plate, tolerance=0.05)
+    room = plate.exterior.distance(centre)
+    r = min(q.knob_d / 2, room - 1.0)
+    if r < 2.5:
+        raise ValueError("this cookie is too narrow for a pusher knob")
+    knob_h = p.height - q.plate_h + q.knob_above
+    base = m3d.Manifold.extrude(_cross_section(plate), q.plate_h)
+    # knob flares into the plate so it doesn't snap at the joint
+    flare = m3d.Manifold.cylinder(2.0, r + 2.0, r, 48).translate((centre.x, centre.y, q.plate_h))
+    knob = m3d.Manifold.cylinder(knob_h, r, r, 48).translate((centre.x, centre.y, q.plate_h))
+    solid = m3d.Manifold.batch_boolean([base, flare, knob], m3d.OpType.Add).to_mesh()
+    return trimesh.Trimesh(solid.vert_properties[:, :3], solid.tri_verts), notes
