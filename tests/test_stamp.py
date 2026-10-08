@@ -2,6 +2,7 @@ import json
 
 import cv2
 import numpy as np
+import pytest
 import trimesh
 from fastapi.testclient import TestClient
 from shapely.geometry import Point, Polygon
@@ -74,6 +75,12 @@ def test_stamp_endpoints():
     res = client.post("/api/stamp", json={"outline_mm": tr["outline_mm"], "lines_mm": lines["lines_mm"]})
     assert res.status_code == 200, res.text
     assert trimesh.load(trimesh.util.wrap_as_stream(res.content), file_type="stl").is_watertight
+    # the other one of a pair, deeper lines
+    res = client.post("/api/stamp", json={"outline_mm": tr["outline_mm"], "lines_mm": lines["lines_mm"],
+                                          "flip": True, "stamp_depth": 3.5})
+    assert res.status_code == 200, res.text
+    assert float(trimesh.load(trimesh.util.wrap_as_stream(res.content), file_type="stl").extents[2]) == \
+        pytest.approx(4 + 3.5, abs=0.05)
     res = client.post("/api/stamp", json={"outline_mm": tr["outline_mm"], "lines_mm": []})
     assert res.status_code == 400
     # a made-up frame scale must not blow up the resampled photo

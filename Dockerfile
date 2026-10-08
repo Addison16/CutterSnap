@@ -7,7 +7,9 @@ COPY pyproject.toml README.md ./
 COPY cuttersnap ./cuttersnap
 RUN pip install .
 
-RUN useradd --create-home cutter
+RUN useradd --create-home cutter && mkdir /data && chown cutter /data
+ENV CUTTERSNAP_DATA=/data
+VOLUME /data
 USER cutter
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/health')"

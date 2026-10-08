@@ -29,7 +29,7 @@ SPECK_MM = 2.5         # line pieces smaller than this square are dropped
 
 @dataclass
 class StampParams:
-    clearance: float = 1.0   # gap between stamp and blade, all round
+    clearance: float = 1.5   # gap between stamp and blade, all round (1.0 was reported tight)
     plate_h: float = 4.0     # plate thickness; the back is flat to press on
     relief_h: float = 2.0    # how far the lines stand off the plate
     line_mm: float = 1.2     # line width, at least two 0.4 mm nozzle lines + a bit
@@ -106,7 +106,7 @@ def build_stamp(outline: Polygon, detail: MultiPolygon, params: CutterParams | N
     """
     p = params or CutterParams()
     s = stamp or StampParams()
-    inner = cutting_face(outline, p.spread)
+    inner = cutting_face(outline, p.spread, p.halo)
     plate = inner.buffer(-s.clearance, join_style=1)
     if plate.is_empty:
         raise ValueError("this cookie is too small for a stamp")

@@ -8,7 +8,7 @@ const ctx = canvas.getContext('2d');
 const state = {
   file: null, img: null, hash: '', scale: 1, view: [0, 0, 1, 1], zoomed: false, tool: 'box', rect: null, fg: [], bg: [], edge: [],
   drag: null, moving: -1, outline: null, outlineMm: null, traceSeq: 0,
-  frame: null, stampMm: [], stampPx: [], stampSeq: 0, checkSeq: 0,
+  frame: null, stampMm: [], stampPx: [], stampSeq: 0, checkSeq: 0, rounded: [],
 };
 
 function setStatus(msg) { $('status').textContent = msg; }
@@ -69,6 +69,9 @@ function draw() {
     ctx.strokeStyle = '#e020e0'; ctx.lineWidth = 2.5; ctx.beginPath();
     state.outline.forEach(([x, y], i) => (i ? ctx.lineTo(X(x), Y(y)) : ctx.moveTo(X(x), Y(y))));
     ctx.closePath(); ctx.stroke();
+    // where the corner rules rounded the traced edge
+    ctx.strokeStyle = '#ff8c1a'; ctx.lineWidth = 2.5;
+    for (const [x, y] of state.rounded) { ctx.beginPath(); ctx.arc(X(x), Y(y), 11, 0, 7); ctx.stroke(); }
   }
   for (const [pts, color] of [[state.fg, '#1fb84a'], [state.bg, '#e0302a']]) {
     ctx.fillStyle = color;
@@ -86,7 +89,7 @@ function toImage(ev) {
 
 // index of the edge point under the pointer, or -1
 function edgeAt(p) {
-  const r = 10 / state.scale;
+  const r = (state.touch ? 22 : 10) / state.scale;  // fingers need a bigger target
   return state.edge.findIndex(([x, y]) => Math.hypot(x - p[0], y - p[1]) <= r);
 }
 
@@ -128,6 +131,7 @@ function eraseStampLine(p) {
 }
 
 canvas.addEventListener('pointerdown', (ev) => {
+  state.touch = ev.pointerType === 'touch';
   if (!state.img) return;
   const p = toImage(ev);
   if (state.tool === 'erase') { eraseStampLine(p); return; }
@@ -183,11 +187,11 @@ $('zoom').addEventListener('click', () => {
 function selectTool(name) { document.querySelector(`[data-tool="${name}"]`).click(); }
 function resetCutter() {
   state.outline = null; state.outlineMm = null;
-  for (const id of ['make', 'edit', 'save']) $(id).disabled = true;
+  for (const id of ['make', 'edit', 'save', 'keep']) $(id).disabled = true;
   $('download').classList.add('hidden');
   $('download-pusher').classList.add('hidden');
   $('download-stamp').classList.add('hidden');
-  state.frame = null; state.stampMm = []; state.stampPx = []; state.check = null;
+  state.frame = null; state.stampMm = []; state.stampPx = []; state.check = null; state.rounded = [];
   showReport([]);
 }
 $('clear').addEventListener('click', () => {
@@ -240,8 +244,9 @@ async function trace() {
     if (seq !== state.traceSeq) return; // a newer trace has started
     resetCutter();
     state.outline = data.outline_px; state.outlineMm = data.outline_mm; state.frame = data.frame;
+    state.rounded = data.rounded_px || [];
     draw();
-    for (const id of ['make', 'edit', 'save']) $(id).disabled = false;
+    for (const id of ['make', 'edit', 'save', 'keep']) $(id).disabled = false;
     findStampLines();
     refreshCheck();
     setStatus((state.edge.length >= 3
@@ -253,6 +258,7 @@ function cutterBody() {
   return {
     outline_mm: state.outlineMm, nozzle_mm: +$('nozzle').value,
     height: +$('height').value, flange_w: +$('flange').value, spread: +$('spread').value,
+    halo: +$('halo').value, text: $('initials').value.trim(), flip: $('flip').checked,
   };
 }
 // radius check of the blade's cutting face, which dough spread makes sharper
@@ -274,12 +280,19 @@ async function refreshCheck() {
 function outlineReport() {
   if (!state.outlineMm) return [];
   const xs = state.outlineMm.map((p) => p[0]), ys = state.outlineMm.map((p) => p[1]);
-  const spread = +$('spread').value || 0;
-  const w = Math.max(...xs) - Math.min(...xs) - 2 * spread, h = Math.max(...ys) - Math.min(...ys) - 2 * spread;
+  const spread = +$('spread').value || 0, halo = +$('halo').value || 0, grow = halo - spread;
+  const w = Math.max(...xs) - Math.min(...xs) + 2 * grow, h = Math.max(...ys) - Math.min(...ys) + 2 * grow;
   const c = state.check || {};
-  const lines = [[`Cookie (inside of the cutter): ${w.toFixed(1)} × ${h.toFixed(1)} mm` + (spread ? `, after ${spread} mm dough spread` : ''), true]];
+  const how = [spread && `${spread} mm dough spread`, halo && `a ${halo} mm halo`].filter(Boolean).join(' and ');
+  const lines = [[`Cookie (inside of the cutter): ${w.toFixed(1)} × ${h.toFixed(1)} mm` + (how ? `, after ${how}` : ''), true]];
   if (c.min_convex_radius_mm != null) {
     lines.push([`Sharpest point rounded to ${c.min_convex_radius_mm} mm radius (minimum 1.5) and tightest notch ${c.min_concave_radius_mm} mm (minimum 2.5)`, c.ok]);
+  }
+  if (state.rounded.length) {
+    lines.push([`Corners rounded in ${state.rounded.length} ${state.rounded.length === 1 ? 'place' : 'places'} (orange rings on the photo), so dough cuts and releases cleanly`, true]);
+  }
+  if (c.facet_mm != null) {
+    lines.push([`Smooth curves: the STL's flat facets stay within ${c.facet_mm} mm of the true curve, too small to print`, c.facet_mm <= 0.05]);
   }
   return lines;
 }
@@ -300,7 +313,7 @@ document.querySelectorAll('[data-size]').forEach((b) => b.addEventListener('clic
 }));
 // the outline is traced at a size, so a new size means a new trace
 $('size').addEventListener('change', () => { if (state.outlineMm && state.img) trace(); });
-$('spread').addEventListener('change', refreshCheck);
+for (const id of ['spread', 'halo']) $(id).addEventListener('change', refreshCheck);
 
 // ---- matching stamp ----------------------------------------------------------
 async function findStampLines() {
@@ -328,7 +341,7 @@ async function findStampLines() {
   if (seq === state.stampSeq) stampBusy(false);
 }
 function stampBusy(busy) {
-  for (const id of ['make', 'save']) $(id).disabled = busy || !state.outlineMm;
+  for (const id of ['make', 'save', 'keep']) $(id).disabled = busy || !state.outlineMm;
 }
 let stampTimer;
 for (const id of ['stamp-on', 'stamp-level', 'stamp-line']) {
@@ -349,7 +362,7 @@ $('make').addEventListener('click', async () => {
     const body = JSON.stringify(cutterBody());
     const post = (url) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
     const wantStamp = $('stamp-on').checked && state.stampMm.length;
-    const stampBody = wantStamp && JSON.stringify({ ...JSON.parse(body), lines_mm: state.stampMm });
+    const stampBody = wantStamp && JSON.stringify({ ...JSON.parse(body), lines_mm: state.stampMm, stamp_depth: +$('stamp-depth').value });
     const [res, pres, sres] = await Promise.all([post('/api/cutter'), post('/api/pusher'), wantStamp
       && fetch('/api/stamp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: stampBody })]);
     if (!res.ok) throw new Error(await apiError(res));
@@ -378,23 +391,31 @@ function setLink(link, blob) {
 }
 
 // ---- project files -----------------------------------------------------------
-const SETTINGS = { nozzle_mm: 'nozzle', height: 'height', flange_w: 'flange', spread: 'spread' };
+const SETTINGS = { nozzle_mm: 'nozzle', height: 'height', flange_w: 'flange', spread: 'spread', halo: 'halo', text: 'initials', flip: 'flip' };
+function settingValue(id) {
+  const el = $(id);
+  return el.type === 'checkbox' ? el.checked : el.type === 'text' ? el.value.trim() : +el.value;
+}
+function setSetting(id, v) { if ($(id).type === 'checkbox') $(id).checked = !!v; else $(id).value = v; }
 
-$('save').addEventListener('click', () => {
-  const project = {
+function currentProject() {
+  return {
     cuttersnap: 1,
     photo: { name: state.file?.name || '', sha256: state.hash },
     marks: { box: state.rect, cookie: state.fg, not_cookie: state.bg, edge: state.edge },
     size_mm: +$('size').value,
-    cutter: Object.fromEntries(Object.entries(SETTINGS).map(([k, id]) => [k, +$(id).value])),
+    cutter: Object.fromEntries(Object.entries(SETTINGS).map(([k, id]) => [k, settingValue(id)])),
     outline_mm: state.outlineMm,
     outline_px: state.outline,
     frame: state.frame,
     stamp: {
       on: $('stamp-on').checked, level: +$('stamp-level').value, line_mm: +$('stamp-line').value,
-      lines_mm: state.stampMm, lines_px: state.stampPx,
+      depth: +$('stamp-depth').value, lines_mm: state.stampMm, lines_px: state.stampPx,
     },
   };
+}
+$('save').addEventListener('click', () => {
+  const project = currentProject();
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([JSON.stringify(project)], { type: 'application/json' }));
   a.download = (state.file?.name || 'cookie').replace(/\.[^.]*$/, '') + '.cuttersnap.json';
@@ -408,28 +429,101 @@ $('open').addEventListener('change', async (e) => {
   if (!f) return;
   let p;
   try { p = JSON.parse(await f.text()); } catch { setStatus('That file is not a CutterSnap project.'); return; }
+  openProject(p, f.name);
+});
+function openProject(p, label) {
   if (p.cuttersnap !== 1 || !Array.isArray(p.outline_mm)) { setStatus('That file is not a CutterSnap project.'); return; }
   const m = p.marks || {};
   resetCutter();
   state.rect = m.box || null; state.fg = m.cookie || []; state.bg = m.not_cookie || []; state.edge = m.edge || [];
   $('size').value = p.size_mm ?? 90;
-  for (const [k, id] of Object.entries(SETTINGS)) if (p.cutter?.[k] != null) $(id).value = p.cutter[k];
+  for (const [k, id] of Object.entries(SETTINGS)) {
+    const el = $(id), v = p.cutter?.[k];
+    if (v != null) setSetting(id, v);
+    else if (el.type === 'checkbox') el.checked = el.defaultChecked;
+    else el.value = el.defaultValue;  // older projects: back to the page's defaults
+  }
   state.outlineMm = p.outline_mm; state.outline = p.outline_px || null; state.frame = p.frame || null;
   const st = p.stamp || {};
   $('stamp-on').checked = !!st.on;
   if (st.level != null) $('stamp-level').value = st.level;
   if (st.line_mm != null) $('stamp-line').value = st.line_mm;
+  if (st.depth != null) $('stamp-depth').value = st.depth;
   state.stampMm = st.lines_mm || []; state.stampPx = st.lines_px || [];
   $('erase-tool').classList.toggle('hidden', !st.on);
-  $('make').disabled = $('save').disabled = false;
+  $('make').disabled = $('save').disabled = $('keep').disabled = false;
   $('edit').disabled = !state.outline;
   draw();
   refreshCheck();
   const same = state.hash && p.photo?.sha256 === state.hash;
-  setStatus(`Opened ${f.name}. ` + (state.img
+  setStatus(`Opened ${label}. ` + (state.img
     ? (same || !p.photo?.sha256 ? 'Make cutter rebuilds it exactly.' : `Note: it was made from a different photo (${p.photo.name}).`)
     : `Make cutter rebuilds it exactly. To edit the outline, also choose the photo ${p.photo?.name || ''}.`));
   if (!state.img) state.keepMarks = true;
+}
+
+// ---- my designs: kept on this CutterSnap for any device ----------------------
+async function loadDesigns() {
+  let list = [];
+  try {
+    const res = await fetch('/api/designs');
+    if (!res.ok) throw new Error(await apiError(res));
+    list = await res.json();
+  } catch (e) { $('designs').textContent = `Could not load saved designs: ${e.message}`; return; }
+  $('designs').replaceChildren(...(list.length ? list.map(designItem) : [Object.assign(document.createElement('li'), {
+    className: 'empty', textContent: 'Nothing saved yet. Make a cutter, then Save to my designs.' })]));
+}
+function designItem(d) {
+  const li = document.createElement('li');
+  const xs = d.thumb_mm.map((p) => p[0]), ys = d.thumb_mm.map((p) => p[1]);
+  const x0 = Math.min(...xs), y1 = Math.max(...ys), span = Math.max(Math.max(...xs) - x0, y1 - Math.min(...ys)) || 1;
+  const pts = d.thumb_mm.map(([x, y]) => `${((x - x0) / span * 40 + 2).toFixed(1)},${((y1 - y) / span * 40 + 2).toFixed(1)}`).join(' ');
+  li.innerHTML = `<svg viewBox="0 0 44 44" width="44" height="44" aria-hidden="true"><polygon points="${pts}"/></svg>
+    <div class="meta"><strong></strong><span></span></div><div class="acts"></div>`;
+  li.querySelector('strong').textContent = d.name;
+  li.querySelector('span').textContent = `${d.size_mm} mm · ${new Date(d.saved_at * 1000).toLocaleDateString()}`;
+  const acts = li.querySelector('.acts');
+  const link = (kind, text) => Object.assign(document.createElement('a'), { href: `/api/designs/${d.id}/${kind}.stl`, textContent: text, className: 'primary', download: '' });
+  acts.append(link('cutter', 'Cutter'), link('pusher', 'Pusher'));
+  if (d.stamp) acts.append(link('stamp', 'Stamp'));
+  const open = Object.assign(document.createElement('button'), { textContent: 'Open' });
+  open.addEventListener('click', async () => {
+    const res = await fetch(`/api/designs/${d.id}`);
+    if (!res.ok) { setStatus(`Could not open: ${await apiError(res)}`); return; }
+    openProject((await res.json()).project, d.name);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+  const del = Object.assign(document.createElement('button'), { textContent: 'Delete' });
+  del.addEventListener('click', async () => {
+    if (!confirm(`Delete "${d.name}" from your designs?`)) return;
+    const res = await fetch(`/api/designs/${d.id}`, { method: 'DELETE' });
+    if (!res.ok) setStatus(`Could not delete: ${await apiError(res)}`);
+    loadDesigns();
+  });
+  acts.append(open, del);
+  return li;
+}
+$('keep').addEventListener('click', async () => {
+  const guess = (state.file?.name || 'Cookie').replace(/\.[^.]*$/, '');
+  const name = prompt('Name this design', guess);
+  if (name === null) return;
+  $('keep').disabled = true;
+  try {
+    const res = await fetch('/api/designs', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, project: currentProject() }) });
+    if (!res.ok) throw new Error(await apiError(res));
+    setStatus(`Saved "${(await res.json()).name}" to My designs. Download it from any device that opens this CutterSnap.`);
+    loadDesigns();
+  } catch (e) { setStatus(`Could not save: ${e.message}`); }
+  $('keep').disabled = !state.outlineMm;
+});
+loadDesigns();
+
+// phones rotate and resize: keep the photo fitted to the screen
+let fitTimer;
+window.addEventListener('resize', () => {
+  clearTimeout(fitTimer);
+  fitTimer = setTimeout(() => { if (state.img) { fitView(state.view); draw(); } }, 150);
 });
 
 // ---- 3D preview -------------------------------------------------------------

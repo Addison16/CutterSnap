@@ -1,12 +1,12 @@
 """Turn a cookie mask into a smooth, printable outline in millimetres."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import cv2
 import numpy as np
 from scipy.interpolate import splev, splprep
-from shapely.geometry import Polygon
+from shapely.geometry import Point, Polygon
 from shapely.ops import orient
 
 
@@ -15,6 +15,7 @@ class Outline:
     polygon: Polygon          # CCW, millimetres, origin at bottom-left of bounds
     px_per_mm: float          # photo pixels per millimetre
     origin_px: tuple[float, float]  # photo pixel (x, y) of the mm origin
+    rounded_mm: list = field(default_factory=list)  # [(x, y, depth)] where the rules moved the edge
 
     def to_pixels(self) -> np.ndarray:
         """Outline points mapped back onto the photo, for drawing an overlay."""
@@ -83,7 +84,84 @@ def mask_to_outline(
     bx0, by0, bx1, by1 = smooth.bounds
     k = size_mm / max(bx1 - bx0, by1 - by0)
     pts = (np.array(smooth.exterior.coords) - [bx0, by0]) * k
-    return Outline(orient(Polygon(pts), 1.0), *_pixel_frame(minx, miny, px_per_mm, scale, k, bx0, by0))
+    final = orient(Polygon(pts), 1.0)
+    return Outline(final, *_pixel_frame(minx, miny, px_per_mm, scale, k, bx0, by0),
+                   rounded_mm=rounded_spots((raw * scale - [bx0, by0]) * k, final))
+
+
+ROUNDED_MM = 1.5   # edge moved further than this by the corner rules: worth pointing out
+MERGE_MM = 6.0     # spots closer than this are one corner
+
+
+def rounded_spots(raw: np.ndarray, final: Polygon) -> list[tuple[float, float, float]]:
+    """Places where the corner rules visibly changed the traced edge.
+
+    Returns one (x, y, depth) per stretch of the traced edge lying more than
+    ROUNDED_MM from the final outline, at its deepest point, in mm.
+    """
+    ring = final.exterior
+    d = np.array([ring.distance(Point(p)) for p in raw])
+    far = d > ROUNDED_MM
+    if not far.any():
+        return []
+    if far.all():
+        i = int(np.argmax(d))
+        return [(round(float(raw[i, 0]), 2), round(float(raw[i, 1]), 2), round(float(d[i]), 2))]
+    # walk the closed contour from a point that is not far, collecting runs
+    start = int(np.argmin(far))
+    order = np.roll(np.arange(len(raw)), -start)
+    spots, run = [], []
+    for i in [*order, order[0]]:
+        if far[i]:
+            run.append(i)
+        elif run:
+            j = max(run, key=lambda r: d[r])
+            spots.append(j)
+            run = []
+    keep = []
+    for j in sorted(spots, key=lambda j: -d[j]):  # deepest first; nearby ones join it
+        if all(np.hypot(*(raw[j] - raw[k])) > MERGE_MM for k in keep):
+            keep.append(j)
+    return [(round(float(raw[j, 0]), 2), round(float(raw[j, 1]), 2), round(float(d[j]), 2)) for j in keep]
+
+
+def resize(poly: Polygon, size_mm: float, min_convex_r: float = 1.5, min_concave_r: float = 2.5,
+           spacing_mm: float = 0.5) -> Polygon:
+    """The outline at another size, with the corner rules applied again.
+
+    Scaling down makes points and notches tighter, so they are rounded again
+    at the new size; the result is then scaled to the exact longest side.
+    """
+    x0, y0, x1, y1 = poly.bounds
+    out = scale_to(poly, size_mm / max(x1 - x0, y1 - y0))
+    out = _exact(out, min_convex_r, min_concave_r, spacing_mm)
+    x0, y0, x1, y1 = out.bounds
+    return scale_to(out, size_mm / max(x1 - x0, y1 - y0))
+
+
+def scale_to(poly: Polygon, k: float) -> Polygon:
+    p = np.array(poly.exterior.coords)
+    x0, y0 = p.min(0)
+    return orient(Polygon((p - [x0, y0]) * k), 1.0)
+
+
+def facet_error(poly: Polygon) -> float:
+    """How far the flat facets between outline points stray from the curve, in mm.
+
+    Each facet is compared with the circle through it and its neighbour: the
+    gap at the middle of the chord (the sagitta). Under about a tenth of a
+    line width it cannot show on a print.
+    """
+    p = np.array(orient(poly, 1.0).exterior.coords)[:-1]
+    a, b = p - np.roll(p, 1, 0), np.roll(p, -1, 0) - p
+    c = np.roll(p, -1, 0) - np.roll(p, 1, 0)
+    cross = a[:, 0] * b[:, 1] - a[:, 1] * b[:, 0]
+    la, lb, lc = (np.linalg.norm(v, axis=1) for v in (a, b, c))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        r = la * lb * lc / np.abs(2 * cross)
+        half = np.maximum(la, lb) / 2
+        sag = np.where(np.isfinite(r) & (r > half), r - np.sqrt(np.maximum(r * r - half * half, 0)), 0.0)
+    return float(sag.max(initial=0.0))
 
 
 def _pixel_frame(minx, miny, px_per_mm, scale, k, bx0, by0):
@@ -107,8 +185,12 @@ def _rules(poly: Polygon, min_convex_r: float, min_concave_r: float, spacing_mm:
     poly = _largest(poly.buffer(-min_convex_r, join_style=1).buffer(min_convex_r, join_style=1))
     poly = _largest(poly.buffer(min_concave_r, join_style=1).buffer(-min_concave_r, join_style=1))
     poly = orient(poly.simplify(0.05), 1.0)
+    # resample evenly first: a spline through a long straight side with only
+    # its two end points (as simplify leaves it) bulges far off the shape
+    ring = poly.exterior
+    m = max(64, int(ring.length / spacing_mm))
+    p = np.array([ring.interpolate(d).coords[0] for d in np.linspace(0, ring.length, m, endpoint=False)])
     # periodic smoothing spline -> evenly spaced points, no kinks
-    p = np.array(poly.exterior.coords)[:-1]
     tck, _ = splprep([p[:, 0], p[:, 1]], s=len(p) * 0.004, per=True)
     n = max(64, int(poly.length / spacing_mm))
     x, y = splev(np.linspace(0, 1, n, endpoint=False), tck)

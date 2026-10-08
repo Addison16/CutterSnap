@@ -1,11 +1,11 @@
+import cv2
 import numpy as np
 import pytest
+from conftest import star_points
 from shapely.geometry import Point, Polygon
 
-from conftest import star_points
 from cuttersnap.cutter import CutterParams, build_cutter
 from cuttersnap.outline import OutlineError, check_outline, mask_to_outline
-import cv2
 
 
 def star_mask():

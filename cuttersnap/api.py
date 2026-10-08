@@ -3,10 +3,11 @@ from __future__ import annotations
 
 import io
 import json
+import re
 from pathlib import Path
 
 import numpy as np
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from PIL import Image, ImageOps
@@ -14,12 +15,21 @@ from pydantic import BaseModel, Field
 from shapely.geometry import Polygon
 from shapely.ops import orient
 
-from . import __version__
-from .cutter import CutterParams, PusherParams, build_cutter, build_pusher, cutting_face
+from . import __version__, library
+from .cutter import (
+    CutterParams,
+    PusherParams,
+    build_cutter,
+    build_pusher,
+    cutting_face,
+    facet_error_mm,
+    flipped,
+)
 from .livewire import edge_mask
 from .outline import Outline, OutlineError, check_outline, mask_to_outline
+from .project import Project
 from .segment import segment
-from .stamp import build_stamp, detail_lines, from_rings, rings
+from .stamp import StampParams, build_stamp, detail_lines, from_rings, rings
 
 try:  # iPhone photos
     from pillow_heif import register_heif_opener
@@ -129,6 +139,11 @@ async def trace(
         "width_mm": round(maxx - minx, 1),
         "height_mm": round(maxy - miny, 1),
         "check": check_outline(poly),
+        # where the corner rules visibly changed the traced edge
+        "rounded_mm": outline.rounded_mm,
+        "rounded_px": [[round(outline.origin_px[0] + x * outline.px_per_mm, 1),
+                        round(outline.origin_px[1] - y * outline.px_per_mm, 1), dep]
+                       for x, y, dep in outline.rounded_mm],
         # maps mm back to photo pixels: px = origin + mm * px_per_mm (y down)
         "frame": {"px_per_mm": outline.px_per_mm, "origin_px": list(outline.origin_px)},
     }
@@ -174,6 +189,9 @@ class CutterRequest(BaseModel):
     flange_w: float = Field(6.0, ge=2, le=20)
     tip_mm: float | None = Field(None, ge=0.3, le=2.0)
     spread: float = Field(0.0, ge=0, le=5)
+    halo: float = Field(0.0, ge=0, le=20)        # grow the outline: a bubble border
+    text: str = Field("", max_length=3)           # initials pressed into the underside of the base
+    flip: bool = False                            # mirror image, for left/right pairs
     clearance: float = Field(2.0, ge=0.5, le=5)  # pusher plate gap, all round
 
 
@@ -184,10 +202,11 @@ def _request_geometry(req: CutterRequest) -> tuple[Polygon, CutterParams]:
     try:
         extra = {"wall_tip": req.tip_mm} if req.tip_mm else {}
         params = CutterParams.for_nozzle(req.nozzle_mm, height=req.height, flange_h=req.flange_h,
-                                         flange_w=req.flange_w, spread=req.spread, **extra)
+                                         flange_w=req.flange_w, spread=req.spread, halo=req.halo,
+                                         text=req.text, **extra)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
-    return orient(poly, 1.0), params
+    return (flipped(poly) if req.flip else orient(poly, 1.0)), params
 
 
 def _stl(mesh, filename: str, notes: list[str]) -> Response:
@@ -206,7 +225,9 @@ def check(req: CutterRequest) -> dict:
     """Radius check of the blade's cutting face, after any dough spread."""
     poly, params = _request_geometry(req)
     try:
-        return check_outline(cutting_face(poly, params.spread))
+        out = check_outline(cutting_face(poly, params.spread, params.halo))
+        out["facet_mm"] = round(facet_error_mm(poly, params), 3)
+        return out
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
 
@@ -215,15 +236,17 @@ def check(req: CutterRequest) -> dict:
 def cutter(req: CutterRequest) -> Response:
     """Build the cutter STL from an outline (as returned by /api/trace)."""
     poly, params = _request_geometry(req)
+    notes = params.warnings(req.nozzle_mm)
     try:
-        mesh = build_cutter(poly, params)
+        mesh = build_cutter(poly, params, notes)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
-    return _stl(mesh, "cookie-cutter.stl", params.warnings(req.nozzle_mm))
+    return _stl(mesh, "cookie-cutter.stl", notes)
 
 
 class StampRequest(CutterRequest):
     lines_mm: list = Field(default_factory=list)  # as returned by /api/stamp-lines
+    stamp_depth: float = Field(StampParams().relief_h, ge=1, le=4)  # how far the lines stand up
 
 
 @app.post("/api/stamp")
@@ -231,10 +254,78 @@ def stamp(req: StampRequest) -> Response:
     """Build the matching stamp STL from an outline and its icing lines."""
     poly, params = _request_geometry(req)
     try:
-        mesh = build_stamp(poly, from_rings(req.lines_mm), params)
+        lines = from_rings(req.lines_mm)
+        if req.flip:
+            lines = flipped(lines, Polygon(req.outline_mm).buffer(0))
+        mesh = build_stamp(poly, lines, params, StampParams(relief_h=req.stamp_depth))
     except (ValueError, TypeError, IndexError) as e:
         raise HTTPException(400, str(e)) from e
     return _stl(mesh, "cookie-stamp.stl", [])
+
+
+# ---- saved designs -------------------------------------------------------------
+MAX_DESIGN_BYTES = 2 * 1024 * 1024
+
+
+@app.get("/api/designs")
+def list_designs() -> list[dict]:
+    return library.designs()
+
+
+@app.post("/api/designs")
+async def save_design(request: Request) -> dict:
+    """Save a project (as written by Save project) under a name."""
+    body = b""
+    async for chunk in request.stream():
+        body += chunk
+        if len(body) > MAX_DESIGN_BYTES:
+            raise HTTPException(413, "design is too large")
+    try:
+        data = json.loads(body)
+        return library.save(data.get("name", ""), data["project"])
+    except (ValueError, KeyError, TypeError, AttributeError) as e:
+        raise HTTPException(400, f"could not save this design: {e}") from e
+
+
+@app.get("/api/designs/{design_id}")
+def get_design(design_id: str) -> dict:
+    try:
+        return library.load(design_id)
+    except KeyError:
+        raise HTTPException(404, "no such design") from None
+
+
+@app.delete("/api/designs/{design_id}")
+def delete_design(design_id: str) -> dict:
+    try:
+        library.delete(design_id)
+    except KeyError:
+        raise HTTPException(404, "no such design") from None
+    return {"ok": True}
+
+
+@app.get("/api/designs/{design_id}/{kind}.stl")
+def design_stl(design_id: str, kind: str) -> Response:
+    """Build a saved design's cutter, pusher or stamp at its saved size."""
+    if kind not in ("cutter", "pusher", "stamp"):
+        raise HTTPException(404, "no such part")
+    try:
+        entry = library.load(design_id)
+        proj = Project.from_json(entry["project"])
+        poly, params = proj.polygon(), proj.params()
+        notes: list[str] = []
+        if kind == "cutter":
+            mesh = build_cutter(poly, params, notes)
+        elif kind == "pusher":
+            mesh, notes = build_pusher(poly, params)
+        else:
+            mesh = build_stamp(poly, proj.stamp_lines(), params, StampParams(relief_h=proj.stamp_depth))
+    except KeyError:
+        raise HTTPException(404, "no such design") from None
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    slug = re.sub(r"[^a-z0-9]+", "-", entry["name"].lower()).strip("-") or "cookie"
+    return _stl(mesh, f"{slug}-{kind}.stl", notes)
 
 
 @app.post("/api/pusher")
