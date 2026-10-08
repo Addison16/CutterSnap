@@ -11,15 +11,18 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from PIL import Image, ImageOps
 from pydantic import BaseModel, Field
+from shapely.affinity import scale
 from shapely.geometry import Polygon
 from shapely.ops import orient
 
 from . import __version__
-from .cutter import CutterParams, PusherParams, build_cutter, build_pusher, cutting_face
+from .bundle import size_set
+from .cutter import (CutterParams, PusherParams, build_cutter, build_pusher, cutting_face,
+                     facet_error_mm)
 from .livewire import edge_mask
 from .outline import Outline, OutlineError, check_outline, mask_to_outline
 from .segment import segment
-from .stamp import build_stamp, detail_lines, from_rings, rings
+from .stamp import StampParams, build_stamp, detail_lines, from_rings, rings
 
 try:  # iPhone photos
     from pillow_heif import register_heif_opener
@@ -129,6 +132,11 @@ async def trace(
         "width_mm": round(maxx - minx, 1),
         "height_mm": round(maxy - miny, 1),
         "check": check_outline(poly),
+        # where the corner rules visibly changed the traced edge
+        "rounded_mm": outline.rounded_mm,
+        "rounded_px": [[round(outline.origin_px[0] + x * outline.px_per_mm, 1),
+                        round(outline.origin_px[1] - y * outline.px_per_mm, 1), dep]
+                       for x, y, dep in outline.rounded_mm],
         # maps mm back to photo pixels: px = origin + mm * px_per_mm (y down)
         "frame": {"px_per_mm": outline.px_per_mm, "origin_px": list(outline.origin_px)},
     }
@@ -174,6 +182,9 @@ class CutterRequest(BaseModel):
     flange_w: float = Field(6.0, ge=2, le=20)
     tip_mm: float | None = Field(None, ge=0.3, le=2.0)
     spread: float = Field(0.0, ge=0, le=5)
+    halo: float = Field(0.0, ge=0, le=20)        # grow the outline: a bubble border
+    text: str = Field("", max_length=16)          # pressed into the underside of the base
+    flip: bool = False                            # mirror image, for left/right pairs
     clearance: float = Field(2.0, ge=0.5, le=5)  # pusher plate gap, all round
 
 
@@ -184,10 +195,19 @@ def _request_geometry(req: CutterRequest) -> tuple[Polygon, CutterParams]:
     try:
         extra = {"wall_tip": req.tip_mm} if req.tip_mm else {}
         params = CutterParams.for_nozzle(req.nozzle_mm, height=req.height, flange_h=req.flange_h,
-                                         flange_w=req.flange_w, spread=req.spread, **extra)
+                                         flange_w=req.flange_w, spread=req.spread, halo=req.halo,
+                                         text=req.text, **extra)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
-    return orient(poly, 1.0), params
+    return (flipped(poly) if req.flip else orient(poly, 1.0)), params
+
+
+def flipped(geom, about: Polygon | None = None):
+    """Left-right mirror about the centre of `about` (default: geom itself),
+    for the other one of a pair, like left and right mittens."""
+    x0, _, x1, _ = (about or geom).bounds
+    out = scale(geom, -1, 1, origin=((x0 + x1) / 2, 0))
+    return orient(out, 1.0) if isinstance(out, Polygon) else out
 
 
 def _stl(mesh, filename: str, notes: list[str]) -> Response:
@@ -206,7 +226,9 @@ def check(req: CutterRequest) -> dict:
     """Radius check of the blade's cutting face, after any dough spread."""
     poly, params = _request_geometry(req)
     try:
-        return check_outline(cutting_face(poly, params.spread))
+        out = check_outline(cutting_face(poly, params.spread, params.halo))
+        out["facet_mm"] = round(facet_error_mm(poly, params), 3)
+        return out
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
 
@@ -215,15 +237,17 @@ def check(req: CutterRequest) -> dict:
 def cutter(req: CutterRequest) -> Response:
     """Build the cutter STL from an outline (as returned by /api/trace)."""
     poly, params = _request_geometry(req)
+    notes = params.warnings(req.nozzle_mm)
     try:
-        mesh = build_cutter(poly, params)
+        mesh = build_cutter(poly, params, notes)
     except ValueError as e:
         raise HTTPException(400, str(e)) from e
-    return _stl(mesh, "cookie-cutter.stl", params.warnings(req.nozzle_mm))
+    return _stl(mesh, "cookie-cutter.stl", notes)
 
 
 class StampRequest(CutterRequest):
     lines_mm: list = Field(default_factory=list)  # as returned by /api/stamp-lines
+    stamp_depth: float = Field(StampParams().relief_h, ge=1, le=4)  # how far the lines stand up
 
 
 @app.post("/api/stamp")
@@ -231,10 +255,27 @@ def stamp(req: StampRequest) -> Response:
     """Build the matching stamp STL from an outline and its icing lines."""
     poly, params = _request_geometry(req)
     try:
-        mesh = build_stamp(poly, from_rings(req.lines_mm), params)
+        lines = from_rings(req.lines_mm)
+        if req.flip:
+            lines = flipped(lines, Polygon(req.outline_mm).buffer(0))
+        mesh = build_stamp(poly, lines, params, StampParams(relief_h=req.stamp_depth))
     except (ValueError, TypeError, IndexError) as e:
         raise HTTPException(400, str(e)) from e
     return _stl(mesh, "cookie-stamp.stl", [])
+
+
+@app.post("/api/set")
+def size_set_zip(req: CutterRequest) -> Response:
+    """The cutter and pusher at 5, 7.5 and 10 cm, with a print card, as a zip."""
+    poly, params = _request_geometry(req)
+    try:
+        data, notes = size_set(poly, params, req.nozzle_mm)
+    except ValueError as e:
+        raise HTTPException(400, str(e)) from e
+    headers = {"Content-Disposition": 'attachment; filename="cookie-cutter-set.zip"'}
+    if notes:
+        headers["X-CutterSnap-Warning"] = " ".join(notes)
+    return Response(data, media_type="application/zip", headers=headers)
 
 
 @app.post("/api/pusher")
