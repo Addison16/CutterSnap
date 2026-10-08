@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ["v*"]  # a version tag publishes :0.1.0, :0.1 and :latest, then the release
   pull_request:
 
 jobs:
@@ -24,7 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: test
     permissions:
-      contents: read
+      contents: write  # creates the GitHub release on a version tag
       packages: write
     steps:
       - uses: actions/checkout@v4
@@ -39,9 +40,12 @@ jobs:
           cache-to: type=gha,mode=max
       - name: Smoke test the image
         run: |
-          docker run -d --name cs -p 8080:8080 cuttersnap-local
-          for i in $(seq 30); do curl -sf localhost:8080/api/health && exit 0; sleep 2; done
-          docker logs cs; exit 1
+          # run it the way the README says, with the designs volume
+          docker run -d --name cs -p 8080:8080 -v cuttersnap-designs:/data cuttersnap-local
+          for i in $(seq 30); do curl -sf localhost:8080/api/health && break; sleep 2; done
+          # the saved-designs folder must be writable by the image's user
+          curl -sf localhost:8080/api/designs | grep -q '^\[\]$' && docker exec cs test -w /data/designs \
+            || { docker logs cs; exit 1; }
       - name: Log in to GitHub Container Registry
         if: github.event_name == 'push'
         uses: docker/login-action@v3
@@ -49,6 +53,16 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Image tags and labels
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/addison16/cuttersnap
+          # main -> latest; tag v0.1.0 -> 0.1.0 and 0.1 (and latest, as main's newest)
+          tags: |
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v') }}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
       # publish only after the smoke test passed; the same layers come from cache
       - name: Publish multi-arch image
         if: github.event_name == 'push'
@@ -58,4 +72,17 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           cache-from: type=gha
-          tags: ghcr.io/addison16/cuttersnap:latest
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+      - name: Create the GitHub release from its notes
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          notes="docs/releases/$TAG.md"
+          if [ ! -f "$notes" ]; then echo "missing $notes"; exit 1; fi
+          if [ "$(grep -m1 '^version' pyproject.toml | cut -d'"' -f2)" != "${TAG#v}" ]; then
+            echo "pyproject.toml version does not match $TAG"; exit 1
+          fi
+          gh release create "$TAG" --title "CutterSnap $TAG" --notes-file "$notes" --verify-tag
