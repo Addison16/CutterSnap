@@ -1,4 +1,6 @@
+from shapely.affinity import scale
 from shapely.geometry import Point, Polygon, box
+from shapely.ops import orient
 from shapely.ops import unary_union
 
 from cuttersnap.cutter import CutterParams, PusherParams, build_pusher
@@ -46,3 +48,12 @@ def test_pusher_endpoint():
     assert res.status_code == 200, res.text
     assert res.headers["content-type"] == "model/stl"
     assert res.headers["x-cutterSnap-size"].startswith("56.")
+
+
+def test_knob_flare_stays_on_plate_with_small_clearance():
+    # a 40 x 17 mm oval: the knob is limited by the plate's width
+    outline = scale(Point(0, 0).buffer(20, 128), 1, 0.425)
+    mesh, _ = build_pusher(outline, CutterParams(), PusherParams(clearance=0.5))
+    plate = orient(outline, 1.0).buffer(-0.5, join_style=1)
+    above = mesh.vertices[mesh.vertices[:, 2] > PusherParams().plate_h - 1e-6]
+    assert all(plate.buffer(1e-3).contains(Point(x, y)) for x, y, _ in above)

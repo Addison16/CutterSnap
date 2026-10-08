@@ -81,3 +81,13 @@ def test_trace_with_edge_points(star_photo):
     res = client.post("/api/trace", files={"image": ("s.png", _png(img), "image/png")},
                       data={"edge": json.dumps(pts[:2])})
     assert res.status_code == 400
+
+
+def test_check_measures_the_cutting_face_after_spread():
+    from shapely.geometry import box
+
+    sq = list(box(0, 0, 40, 40).buffer(2, join_style=1).exterior.coords)[:-1]
+    c0 = client.post("/api/check", json={"outline_mm": sq}).json()
+    c1 = client.post("/api/check", json={"outline_mm": sq, "spread": 1.0}).json()
+    assert c0["ok"] and c1["ok"]
+    assert c1["min_convex_radius_mm"] >= 1.5 * 0.9

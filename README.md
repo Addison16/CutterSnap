@@ -22,6 +22,16 @@ Then open http://localhost:8080.
    a matching plate 2 mm smaller all round with a knob: press it down through the cutter
    to push out dough that sticks in narrow parts.
 
+**Matching stamp.** Tick **Matching stamp** and the icing lines inside the cookie show in
+blue on the photo. **Stamp detail** finds fainter lines or gives a cleaner stamp, and
+**Erase stamp line** removes any line you don't want (crumbs, watermarks, shine). Make
+cutter then also offers **Download stamp**: a 4 mm plate that fits inside the cutter with
+1 mm clearance and the lines raised 2 mm. Print it flat side down. After cutting, press
+it into the dough inside the cutter to print the design.
+
+The cutter and stamp are built as mirror images, because both are turned over to use;
+the cookie and its imprint come out the same way round as the photo.
+
 If the outline still follows the icing instead of the cookie (white icing on a white
 plate, stripes near the edge, a pale rim the same colour as the table):
 
@@ -77,7 +87,8 @@ machine.
   instead of a stepped "extra blade".
 - **Tracing that copes with real photos.** Automatic edge tracing ignores icing details,
   and Edge points handle white-on-white cookies and striped icing.
-- **Pusher plate** for shapes where dough sticks.
+- **Pusher plate** for shapes where dough sticks, and a **matching stamp** made from the
+  icing lines in the same photo.
 - **Project files** that rebuild the same STL, byte for byte.
 - **Free, self-hosted, no accounts, no AI, nothing uploaded anywhere.**
 
@@ -105,6 +116,7 @@ pip install .
 cuttersnap photo.jpg cutter.stl --box 520,1060,350,380 --cookie 690,1250 --size 90 --preview check.jpg
 cuttersnap photo.jpg cutter.stl --edge 876,602 --edge 920,582 --edge 1031,655 ... --save-project heart.json
 cuttersnap heart.json cutter.stl --pusher pusher.stl   # rebuild a saved project, plus a pusher plate
+cuttersnap apple.jpg cutter.stl --box 520,1060,350,380 --stamp stamp.stl --stamp-detail 0.5
 ```
 
 ## Development

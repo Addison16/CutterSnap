@@ -25,6 +25,7 @@
         <button data-tool="edge" title="Click points on the cookie's edge, in order around it. Drag a point to move it, shift-click to remove it.">Edge points</button>
         <button id="clear">Clear marks</button>
         <button id="zoom" disabled>Zoom to box</button>
+        <button data-tool="erase" class="hidden" id="erase-tool" title="Click a blue stamp line to leave it off the stamp">Erase stamp line</button>
       </div>
     </div>
     <div class="canvas-wrap"><canvas id="photo"></canvas><p id="hint">Drop or choose a photo to start.</p></div>
@@ -41,6 +42,12 @@
     <label>Cutter height (mm) <input type="number" id="height" value="18" min="8" max="40"></label>
     <label>Base width (mm) <input type="number" id="flange" value="6" min="2" max="20"></label>
     <label title="Baked cookies spread. Shrink the cutter to match the raw dough; about 1 mm suits sugar cookies.">Dough spread (mm) <input type="number" id="spread" value="0" min="0" max="5" step="0.5"></label>
+    <fieldset id="stamp-box">
+      <legend><label><input type="checkbox" id="stamp-on"> Matching stamp</label></legend>
+      <p class="hint">A plate that fits inside the cutter with the icing lines raised on it, to press the design into the dough. The lines show in blue on the photo.</p>
+      <label title="Higher finds fainter lines; lower gives a cleaner stamp">Stamp detail <input type="range" id="stamp-level" min="0" max="1" step="0.1" value="0.5"></label>
+      <label>Stamp line width (mm) <input type="number" id="stamp-line" value="1.2" min="0.8" max="3" step="0.1"></label>
+    </fieldset>
     <button id="trace" class="primary" disabled>Trace outline</button>
     <button id="edit" disabled title="Turn the traced outline into edge points you can drag">Edit as points</button>
     <button id="make" class="primary" disabled>Make cutter</button>
@@ -48,12 +55,14 @@
     <a id="download" class="primary hidden" download="cookie-cutter.stl">Download cutter</a>
     <a id="download-pusher" class="primary hidden" download="cookie-pusher.stl"
        title="A plate 2 mm smaller than the cookie with a knob: press it down through the cutter to push out dough that sticks">Download pusher</a>
+    <a id="download-stamp" class="primary hidden" download="cookie-stamp.stl">Download stamp</a>
     <p id="status" aria-live="polite"></p>
     <ul id="report" class="hidden"></ul>
     <div id="preview"></div>
     <details id="care">
       <summary>Printing and care tips</summary>
       <ul>
+        <li>The cutter and stamp are built as mirror images, because you turn them over to use them; the cookie comes out the same way round as the photo. Print the stamp flat side down.</li>
         <li>Print base-down with no supports and no brim. The cutting edge is two nozzle widths, so your slicer lays it down as two full lines.</li>
         <li>Put the seam on the outside or "random", not on a sharp point of the blade.</li>
         <li>PETG lasts longer than PLA. PLA softens around 50 °C, so wash cutters by hand in warm, not hot, water and keep them out of the dishwasher and hot cars.</li>

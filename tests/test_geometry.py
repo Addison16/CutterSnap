@@ -109,3 +109,12 @@ def test_radius_minimums_met_at_every_preset_size(star_photo, size):
     _, truth = star_photo
     c = check_outline(mask_to_outline(truth, size).polygon)
     assert c["min_convex_radius_mm"] >= 1.5 and c["min_concave_radius_mm"] >= 2.5, c
+
+
+@pytest.mark.parametrize("spread", [0.5, 1.0, 2.0])
+def test_dough_spread_keeps_radius_minimums(spread):
+    from cuttersnap.cutter import cutting_face
+    from cuttersnap.outline import check_outline
+
+    face = cutting_face(mask_to_outline(star_mask(), 90).polygon, spread)
+    assert check_outline(face)["ok"]

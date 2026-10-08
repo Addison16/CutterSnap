@@ -8,6 +8,7 @@ const ctx = canvas.getContext('2d');
 const state = {
   file: null, img: null, hash: '', scale: 1, view: [0, 0, 1, 1], zoomed: false, tool: 'box', rect: null, fg: [], bg: [], edge: [],
   drag: null, moving: -1, outline: null, outlineMm: null, traceSeq: 0,
+  frame: null, stampMm: [], stampPx: [], stampSeq: 0, checkSeq: 0,
 };
 
 function setStatus(msg) { $('status').textContent = msg; }
@@ -60,6 +61,10 @@ function draw() {
     ctx.strokeStyle = '#2a8ef0'; ctx.lineWidth = 2;
     ctx.strokeRect(X(r[0]), Y(r[1]), r[2] * s, r[3] * s);
   }
+  if (state.stampPx.length && $('stamp-on').checked) {
+    ctx.fillStyle = 'rgba(20, 120, 255, 0.6)';
+    ctx.fill(stampPath(X, Y), 'evenodd');
+  }
   if (state.outline) {
     ctx.strokeStyle = '#e020e0'; ctx.lineWidth = 2.5; ctx.beginPath();
     state.outline.forEach(([x, y], i) => (i ? ctx.lineTo(X(x), Y(y)) : ctx.moveTo(X(x), Y(y))));
@@ -99,9 +104,33 @@ function insertEdge(p) {
   e.splice(best, 0, p);
 }
 
+// stamp lines as one canvas path; with i set, only shape i
+function stampPath(X, Y, i = -1) {
+  const path = new Path2D();
+  state.stampPx.forEach((shape, k) => {
+    if (i >= 0 && k !== i) return;
+    for (const ring of shape) {
+      ring.forEach(([x, y], j) => (j ? path.lineTo(X(x), Y(y)) : path.moveTo(X(x), Y(y))));
+      path.closePath();
+    }
+  });
+  return path;
+}
+
+// leave the clicked line off the stamp
+function eraseStampLine(p) {
+  const id = (v) => v;
+  const i = state.stampPx.findIndex((_, k) => ctx.isPointInPath(stampPath(id, id, k), p[0], p[1], 'evenodd'));
+  if (i < 0) return;
+  state.stampPx.splice(i, 1); state.stampMm.splice(i, 1);
+  $('download-stamp').classList.add('hidden');
+  draw();
+}
+
 canvas.addEventListener('pointerdown', (ev) => {
   if (!state.img) return;
   const p = toImage(ev);
+  if (state.tool === 'erase') { eraseStampLine(p); return; }
   if (state.tool === 'box') { state.drag = [p[0], p[1], 0, 0]; state.start = p; canvas.setPointerCapture(ev.pointerId); }
   else if (state.tool === 'edge') {
     const i = edgeAt(p);
@@ -157,6 +186,8 @@ function resetCutter() {
   for (const id of ['make', 'edit', 'save']) $(id).disabled = true;
   $('download').classList.add('hidden');
   $('download-pusher').classList.add('hidden');
+  $('download-stamp').classList.add('hidden');
+  state.frame = null; state.stampMm = []; state.stampPx = []; state.check = null;
   showReport([]);
 }
 $('clear').addEventListener('click', () => {
@@ -208,15 +239,36 @@ async function trace() {
     const data = await res.json();
     if (seq !== state.traceSeq) return; // a newer trace has started
     resetCutter();
-    state.outline = data.outline_px; state.outlineMm = data.outline_mm;
+    state.outline = data.outline_px; state.outlineMm = data.outline_mm; state.frame = data.frame;
     draw();
     for (const id of ['make', 'edit', 'save']) $(id).disabled = false;
-    state.check = data.check;
-    showReport(outlineReport());
+    findStampLines();
+    refreshCheck();
     setStatus((state.edge.length >= 3
       ? 'Drag or add yellow points where it misses the edge.'
       : 'Wrong edge? Add cookie / not cookie clicks and trace again, or use Edit as points.'));
   } catch (e) { if (seq === state.traceSeq) { resetCutter(); draw(); setStatus(`Could not trace: ${e.message}`); } }
+}
+function cutterBody() {
+  return {
+    outline_mm: state.outlineMm, nozzle_mm: +$('nozzle').value,
+    height: +$('height').value, flange_w: +$('flange').value, spread: +$('spread').value,
+  };
+}
+// radius check of the blade's cutting face, which dough spread makes sharper
+async function refreshCheck() {
+  if (!state.outlineMm) return;
+  const seq = ++state.checkSeq;
+  state.check = null;
+  showReport(outlineReport());
+  try {
+    const res = await fetch('/api/check', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(cutterBody()) });
+    if (!res.ok) throw new Error(await apiError(res));
+    const check = await res.json();
+    if (seq !== state.checkSeq) return;
+    state.check = check;
+    showReport(outlineReport());
+  } catch (e) { if (seq === state.checkSeq) setStatus(`Could not check the outline: ${e.message}`); }
 }
 // what the finished cookie will measure, and what the checks found
 function outlineReport() {
@@ -248,7 +300,40 @@ document.querySelectorAll('[data-size]').forEach((b) => b.addEventListener('clic
 }));
 // the outline is traced at a size, so a new size means a new trace
 $('size').addEventListener('change', () => { if (state.outlineMm && state.img) trace(); });
-$('spread').addEventListener('change', () => { if (state.outlineMm) showReport(outlineReport()); });
+$('spread').addEventListener('change', refreshCheck);
+
+// ---- matching stamp ----------------------------------------------------------
+async function findStampLines() {
+  const on = $('stamp-on').checked;
+  $('erase-tool').classList.toggle('hidden', !on);
+  const seq = ++state.stampSeq;
+  if (!on || !state.frame || !state.file) { stampBusy(false); draw(); return; }
+  stampBusy(true);  // Make and Save wait for the lines, or the stamp would be left out
+  const form = new FormData();
+  form.append('image', state.file);
+  form.append('outline_mm', JSON.stringify(state.outlineMm));
+  form.append('frame', JSON.stringify(state.frame));
+  form.append('level', $('stamp-level').value);
+  form.append('line_mm', $('stamp-line').value);
+  try {
+    const res = await fetch('/api/stamp-lines', { method: 'POST', body: form });
+    if (!res.ok) throw new Error(await apiError(res));
+    const data = await res.json();
+    if (seq !== state.stampSeq) return;
+    state.stampMm = data.lines_mm; state.stampPx = data.lines_px;
+    $('download-stamp').classList.add('hidden');
+    draw();
+    if (!data.lines_mm.length) setStatus('No icing lines found for a stamp. Try more stamp detail.');
+  } catch (e) { if (seq === state.stampSeq) setStatus(`Could not find stamp lines: ${e.message}`); }
+  if (seq === state.stampSeq) stampBusy(false);
+}
+function stampBusy(busy) {
+  for (const id of ['make', 'save']) $(id).disabled = busy || !state.outlineMm;
+}
+let stampTimer;
+for (const id of ['stamp-on', 'stamp-level', 'stamp-line']) {
+  $(id).addEventListener('change', () => { clearTimeout(stampTimer); stampTimer = setTimeout(findStampLines, 100); });
+}
 
 $('trace').addEventListener('click', async () => {
   $('trace').disabled = true;
@@ -260,12 +345,13 @@ $('make').addEventListener('click', async () => {
   if (!state.outlineMm) return;
   setStatus('Building cutter…'); $('make').disabled = true;
   try {
-    const body = JSON.stringify({
-      outline_mm: state.outlineMm, nozzle_mm: +$('nozzle').value,
-      height: +$('height').value, flange_w: +$('flange').value, spread: +$('spread').value,
-    });
+    for (const id of ['download', 'download-pusher', 'download-stamp']) $(id).classList.add('hidden');
+    const body = JSON.stringify(cutterBody());
     const post = (url) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body });
-    const [res, pres] = await Promise.all([post('/api/cutter'), post('/api/pusher')]);
+    const wantStamp = $('stamp-on').checked && state.stampMm.length;
+    const stampBody = wantStamp && JSON.stringify({ ...JSON.parse(body), lines_mm: state.stampMm });
+    const [res, pres, sres] = await Promise.all([post('/api/cutter'), post('/api/pusher'), wantStamp
+      && fetch('/api/stamp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: stampBody })]);
     if (!res.ok) throw new Error(await apiError(res));
     const blob = await res.blob();
     setLink($('download'), blob);
@@ -274,6 +360,8 @@ $('make').addEventListener('click', async () => {
     if (pres.ok) setLink($('download-pusher'), await pres.blob());
     else notes.push(`No pusher plate: ${await apiError(pres)}.`);
     if (pres.ok && pres.headers.get('X-CutterSnap-Warning')) notes.push(pres.headers.get('X-CutterSnap-Warning'));
+    if (sres && sres.ok) setLink($('download-stamp'), await sres.blob());
+    else if (sres) notes.push(`No stamp: ${await apiError(sres)}.`);
     const [w, h] = (res.headers.get('X-CutterSnap-Size') || '').split('x');
     showReport([...outlineReport(),
       [`Cutter footprint with its base: ${w} × ${h} mm, ${$('height').value} mm tall`, true],
@@ -301,6 +389,11 @@ $('save').addEventListener('click', () => {
     cutter: Object.fromEntries(Object.entries(SETTINGS).map(([k, id]) => [k, +$(id).value])),
     outline_mm: state.outlineMm,
     outline_px: state.outline,
+    frame: state.frame,
+    stamp: {
+      on: $('stamp-on').checked, level: +$('stamp-level').value, line_mm: +$('stamp-line').value,
+      lines_mm: state.stampMm, lines_px: state.stampPx,
+    },
   };
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([JSON.stringify(project)], { type: 'application/json' }));
@@ -321,10 +414,17 @@ $('open').addEventListener('change', async (e) => {
   state.rect = m.box || null; state.fg = m.cookie || []; state.bg = m.not_cookie || []; state.edge = m.edge || [];
   $('size').value = p.size_mm ?? 90;
   for (const [k, id] of Object.entries(SETTINGS)) if (p.cutter?.[k] != null) $(id).value = p.cutter[k];
-  state.outlineMm = p.outline_mm; state.outline = p.outline_px || null;
+  state.outlineMm = p.outline_mm; state.outline = p.outline_px || null; state.frame = p.frame || null;
+  const st = p.stamp || {};
+  $('stamp-on').checked = !!st.on;
+  if (st.level != null) $('stamp-level').value = st.level;
+  if (st.line_mm != null) $('stamp-line').value = st.line_mm;
+  state.stampMm = st.lines_mm || []; state.stampPx = st.lines_px || [];
+  $('erase-tool').classList.toggle('hidden', !st.on);
   $('make').disabled = $('save').disabled = false;
   $('edit').disabled = !state.outline;
   draw();
+  refreshCheck();
   const same = state.hash && p.photo?.sha256 === state.hash;
   setStatus(`Opened ${f.name}. ` + (state.img
     ? (same || !p.photo?.sha256 ? 'Make cutter rebuilds it exactly.' : `Note: it was made from a different photo (${p.photo.name}).`)

@@ -91,6 +91,7 @@ def _grabcut(im, box, prior, clicks, iters) -> np.ndarray:
         for p in pts or ():
             cv2.circle(mask, p, rad, int(val), -1)
     bgd, fgd = np.zeros((1, 65), np.float64), np.zeros((1, 65), np.float64)
+    cv2.setRNGSeed(0)  # GrabCut seeds its colour models randomly: same input, same outline
     cv2.grabCut(im, mask, None, bgd, fgd, iters, cv2.GC_INIT_WITH_MASK)
     return np.where((mask == cv2.GC_FGD) | (mask == cv2.GC_PR_FGD), 255, 0).astype(np.uint8)
 

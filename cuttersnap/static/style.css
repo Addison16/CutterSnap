@@ -31,3 +31,8 @@ canvas { max-width: 100%; display: block; touch-action: none; border-radius: 6px
 #report .bad { color: #c0392b; }
 #care { margin-top: 12px; color: var(--muted); }
 #care summary { cursor: pointer; color: var(--ink); }
+#stamp-box { border: 1px solid var(--line); border-radius: 8px; margin: 10px 0; padding: 4px 12px 8px; }
+#stamp-box legend label { display: inline; margin: 0; }
+#stamp-box legend input { width: auto; }
+#stamp-box .hint { color: var(--muted); font-size: .9rem; margin: 2px 0 6px; }
+#settings input[type=range] { width: 110px; }

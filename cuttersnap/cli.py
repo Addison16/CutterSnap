@@ -20,6 +20,7 @@ from .livewire import edge_mask
 from .outline import check_outline, mask_to_outline
 from .project import Project, sha256_file
 from .segment import segment
+from .stamp import build_stamp, detail_lines, from_rings, rings
 
 
 def _pt(s: str) -> tuple[int, int]:
@@ -44,6 +45,9 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--preview", help="also write a JPEG of the photo with the traced outline")
     ap.add_argument("--save-project", help="also write a .json project file")
     ap.add_argument("--pusher", help="also write a pusher plate .stl (2 mm smaller, with a knob)")
+    ap.add_argument("--stamp", help="also write a matching stamp .stl with the icing lines raised")
+    ap.add_argument("--stamp-detail", type=float, default=0.5,
+                    help="0 to 1: higher finds fainter icing lines (default 0.5)")
     a = ap.parse_args(argv)
 
     if a.photo.lower().endswith(".json"):
@@ -59,11 +63,13 @@ def main(argv: list[str] | None = None) -> None:
         mask = edge_mask(img, a.edge) if a.edge else segment(img, box, a.cookie, a.not_cookie)
         outline = mask_to_outline(mask, a.size)
         poly = outline.polygon
+        lines = detail_lines(img, outline, a.stamp_detail) if a.stamp else None
         proj = Project(outline_mm=[[round(x, 3), round(y, 3)] for x, y in poly.exterior.coords[:-1]],
                        size_mm=a.size, photo_name=a.photo, photo_sha256=sha256_file(a.photo),
                        box=list(box) if box else None, cookie=[list(p) for p in a.cookie],
                        not_cookie=[list(p) for p in a.not_cookie], edge=[list(p) for p in a.edge],
-                       nozzle_mm=a.nozzle, spread=a.spread)
+                       nozzle_mm=a.nozzle, spread=a.spread,
+                       stamp_lines_mm=rings(lines) if lines is not None else [])
         # build from the rounded outline, exactly as a reload of the project would
         poly = orient(Polygon(proj.outline_mm).buffer(0), 1.0)
         if a.preview:
@@ -77,6 +83,10 @@ def main(argv: list[str] | None = None) -> None:
     mesh.export(a.out)
     if a.save_project:
         proj.save(a.save_project)
+    if a.stamp:
+        if not proj.stamp_lines_mm:
+            ap.error("this project has no stamp lines; make the stamp from the photo")
+        build_stamp(poly, from_rings(proj.stamp_lines_mm), params).export(a.stamp)
     if a.pusher:
         plate, notes = build_pusher(poly, params)
         plate.export(a.pusher)
