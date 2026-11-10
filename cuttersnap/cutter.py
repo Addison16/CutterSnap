@@ -26,7 +26,7 @@ from shapely.affinity import rotate, scale, translate
 from shapely.geometry import MultiPolygon, Polygon
 from shapely.ops import orient, polylabel, unary_union
 
-from .outline import OutlineError, _exact, facet_error
+from .outline import OutlineError, _exact, check_outline, facet_error
 
 CHAMFER_SLICES = 6
 TAPER_SLICES = 16
@@ -137,6 +137,18 @@ def flipped(geom, about: Polygon | None = None):
     return orient(out, 1.0) if isinstance(out, Polygon) else out
 
 
+def rounded(outline: Polygon, min_convex_r: float = 1.5, min_concave_r: float = 2.5) -> Polygon:
+    """The outline with every point and notch rounded to the minimum radii."""
+    try:
+        return _exact(orient(outline, 1.0), min_convex_r, min_concave_r, 0.5)
+    except OutlineError:
+        raise ValueError("this shape is too thin to round to a safe cutting edge") from None
+
+
+def needs_rounding(outline: Polygon) -> bool:
+    return not check_outline(orient(outline, 1.0))["ok"]
+
+
 def cutting_face(outline: Polygon, spread: float = 0.0, halo: float = 0.0,
                  min_convex_r: float = 1.5, min_concave_r: float = 2.5) -> Polygon:
     """The blade's inner face: the outline grown by the halo and shrunk by the
@@ -146,6 +158,10 @@ def cutting_face(outline: Polygon, spread: float = 0.0, halo: float = 0.0,
     does it to notches), so the result is rounded to the minimum radii again.
     """
     poly = orient(outline, 1.0)
+    if not check_outline(poly, min_convex_r, min_concave_r)["ok"]:
+        # an outline from a file or another program can have sharp points,
+        # notches and slits the tracer never makes; round them like a trace
+        poly = rounded(poly, min_convex_r, min_concave_r)
     d = halo - spread
     if not d:
         return poly
@@ -251,6 +267,9 @@ def build_cutter(outline: Polygon, params: CutterParams | None = None,
     """
     p = params or CutterParams()
     p.validate()
+    if notes is not None and needs_rounding(outline):
+        notes.append("Sharp points, notches or thin slits in this outline were rounded so the blade "
+                     "cuts cleanly and the dough comes out whole.")
     face = cutting_face(outline, p.spread, p.halo)
     inner = mirrored(face)
     parts = [_slab(inner, p.wall_base + p.flange_w, 0.0, p.flange_h)]
