@@ -158,13 +158,13 @@ def cutting_face(outline: Polygon, spread: float = 0.0, halo: float = 0.0,
     does it to notches), so the result is rounded to the minimum radii again.
     """
     poly = orient(outline, 1.0)
-    if not check_outline(poly, min_convex_r, min_concave_r)["ok"]:
-        # an outline from a file or another program can have sharp points,
-        # notches and slits the tracer never makes; round them like a trace
-        poly = rounded(poly, min_convex_r, min_concave_r)
     d = halo - spread
     if not d:
-        return poly
+        if check_outline(poly, min_convex_r, min_concave_r)["ok"]:
+            return poly
+        # an outline from a file or another program can have sharp points,
+        # notches and slits the tracer never makes; round them like a trace
+        return rounded(poly, min_convex_r, min_concave_r)
     moved = poly.buffer(d, join_style=1)
     try:
         if moved.is_empty or moved.geom_type != "Polygon":

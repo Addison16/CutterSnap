@@ -6,3 +6,4 @@ dist/
 *.stl
 .venv/
 data/
+!tests/data/

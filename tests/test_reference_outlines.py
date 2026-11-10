@@ -44,3 +44,11 @@ def test_traced_outline_is_left_alone():
     poly = Point(40, 40).buffer(35, 64)
     assert not needs_rounding(poly)
     assert cutting_face(poly).equals(poly)
+
+
+def test_thin_drawing_is_rounded_after_the_halo():
+    from shapely.geometry import box
+
+    thin = box(0, 0, 80, 2).segmentize(0.5)  # too thin to round on its own
+    face = cutting_face(thin, halo=5.0)
+    assert check_outline(face)["ok"] and face.bounds[2] - face.bounds[0] > 85
