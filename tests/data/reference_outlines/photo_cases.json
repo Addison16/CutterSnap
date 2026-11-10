@@ -1,0 +1,237 @@
+{
+ "about": "Marks for tracing the bundle's two reference screenshots (woodland, winter). The screenshots are third-party photos and are not in the repository: run python -m cuttersnap.benchmark on this file with --photos pointing at your own copies; they are matched by sha256. Names are reference:how-it-was-marked.",
+ "photos": {
+  "woodland": "fc1f90c726b67a26f6fc20a8c437556f983e32a311a2a6bb1510d4c5fe95bf77",
+  "winter": "6d3b4ebb9de2472658e08aa65de0aa906523a0d3d04107891e896a21fff8d42d"
+ },
+ "cases": [
+  {
+   "name": "bear:box",
+   "photo_sha256": "fc1f90c726b67a26f6fc20a8c437556f983e32a311a2a6bb1510d4c5fe95bf77",
+   "reference": "bear.json",
+   "box": [
+    495,
+    440,
+    185,
+    340
+   ]
+  },
+  {
+   "name": "squirrel:box",
+   "photo_sha256": "fc1f90c726b67a26f6fc20a8c437556f983e32a311a2a6bb1510d4c5fe95bf77",
+   "reference": "squirrel.json",
+   "box": [
+    268,
+    772,
+    232,
+    268
+   ]
+  },
+  {
+   "name": "deer:box",
+   "photo_sha256": "fc1f90c726b67a26f6fc20a8c437556f983e32a311a2a6bb1510d4c5fe95bf77",
+   "reference": "deer.json",
+   "box": [
+    300,
+    1085,
+    185,
+    300
+   ]
+  },
+  {
+   "name": "pine_tree:box",
+   "photo_sha256": "6d3b4ebb9de2472658e08aa65de0aa906523a0d3d04107891e896a21fff8d42d",
+   "reference": "pine_tree.json",
+   "box": [
+    330,
+    328,
+    165,
+    240
+   ]
+  },
+  {
+   "name": "pom_pom_hat:box",
+   "photo_sha256": "6d3b4ebb9de2472658e08aa65de0aa906523a0d3d04107891e896a21fff8d42d",
+   "reference": "pom_pom_hat.json",
+   "box": [
+    288,
+    775,
+    192,
+    235
+   ]
+  },
+  {
+   "name": "bear:clicks",
+   "photo_sha256": "fc1f90c726b67a26f6fc20a8c437556f983e32a311a2a6bb1510d4c5fe95bf77",
+   "reference": "bear.json",
+   "box": [
+    495,
+    440,
+    185,
+    340
+   ],
+   "not_cookie": [
+    [
+     588,
+     770
+    ],
+    [
+     590,
+     760
+    ]
+   ],
+   "cookie": [
+    [
+     590,
+     600
+    ],
+    [
+     560,
+     760
+    ],
+    [
+     625,
+     760
+    ]
+   ]
+  },
+  {
+   "name": "squirrel:clicks",
+   "photo_sha256": "fc1f90c726b67a26f6fc20a8c437556f983e32a311a2a6bb1510d4c5fe95bf77",
+   "reference": "squirrel.json",
+   "box": [
+    268,
+    772,
+    232,
+    268
+   ],
+   "not_cookie": [
+    [
+     276,
+     947
+    ],
+    [
+     281,
+     880
+    ],
+    [
+     283,
+     1000
+    ]
+   ],
+   "cookie": [
+    [
+     330,
+     900
+    ],
+    [
+     440,
+     900
+    ],
+    [
+     310,
+     800
+    ]
+   ]
+  },
+  {
+   "name": "pine_tree:clicks",
+   "photo_sha256": "6d3b4ebb9de2472658e08aa65de0aa906523a0d3d04107891e896a21fff8d42d",
+   "reference": "pine_tree.json",
+   "box": [
+    330,
+    328,
+    165,
+    240
+   ],
+   "not_cookie": [
+    [
+     338,
+     450
+    ],
+    [
+     340,
+     400
+    ],
+    [
+     470,
+     420
+    ],
+    [
+     485,
+     500
+    ]
+   ],
+   "cookie": [
+    [
+     400,
+     450
+    ],
+    [
+     400,
+     370
+    ],
+    [
+     360,
+     530
+    ]
+   ]
+  },
+  {
+   "name": "pine_tree:edge",
+   "photo_sha256": "6d3b4ebb9de2472658e08aa65de0aa906523a0d3d04107891e896a21fff8d42d",
+   "reference": "pine_tree.json",
+   "box": null,
+   "edge": [
+    [
+     398,
+     332
+    ],
+    [
+     422,
+     332
+    ],
+    [
+     455,
+     430
+    ],
+    [
+     483,
+     543
+    ],
+    [
+     476,
+     555
+    ],
+    [
+     412,
+     556
+    ],
+    [
+     410,
+     566
+    ],
+    [
+     392,
+     566
+    ],
+    [
+     390,
+     556
+    ],
+    [
+     333,
+     555
+    ],
+    [
+     328,
+     543
+    ],
+    [
+     365,
+     430
+    ]
+   ]
+  }
+ ]
+}
