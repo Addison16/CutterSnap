@@ -13,3 +13,15 @@ every one now builds a watertight cutter whose blade passes the corner rules.
 
 Points were sampled every 0.25 mm along each SVG path, with y flipped to
 CutterSnap's y-up millimetre frame.
+
+## Scoring photo traces
+
+`photo_cases.json` lists the clicks for tracing five of these cookies from
+the bundle's two screenshots. The screenshots are not in the repository
+(they are other people's photos). With your own copies in a folder:
+
+    python -m cuttersnap.benchmark tests/data/reference_outlines/photo_cases.json --photos FOLDER
+
+Scores are overlap with the reference (1.0 = identical). The references are
+redrawn designs, not exact tracings of the photos, so use the scores to
+compare tracer versions, not as a pass mark. Baseline on 2026-11-10: mean 0.811.

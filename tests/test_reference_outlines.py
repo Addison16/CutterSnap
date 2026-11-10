@@ -14,7 +14,7 @@ from cuttersnap.outline import check_outline
 from cuttersnap.project import Project
 
 DATA = Path(__file__).parent / "data" / "reference_outlines"
-NAMES = sorted(p.stem for p in DATA.glob("*.json"))
+NAMES = sorted(p.stem for p in DATA.glob("*.json") if p.stem != "photo_cases")
 
 
 def test_all_six_are_here():
